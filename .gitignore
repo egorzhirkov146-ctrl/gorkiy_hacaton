@@ -1,0 +1,22 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Аудио (генерируемые файлы)
+*.mp3
+*.wav
+*.webm
+*.ogg
+
+# Кэш TTS и модели
+.tts_cache/
+
+# Секреты
+.env
+
+# macOS / IDE
+.DS_Store
+.vscode/
+.idea/
