@@ -1,0 +1,12 @@
+﻿services:
+  backend:
+    build: .
+    container_name: assistant-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./data:/app/data
+    restart: unless-stopped
