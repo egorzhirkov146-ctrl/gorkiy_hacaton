@@ -23,6 +23,36 @@
 | recurrence | VARCHAR(16) | нет | правило повтора: daily, weekdays, weekly, monthly или yearly |
 | recurrence_until | DATETIME | нет | последний день, до которого действует повтор |
 
+Колонка type принимает значения task, meeting и reminder, колонка status принимает значения pending, done и cancelled, а ограничения CHECK не дают записать другие значения. Колонка datetime пуста у задачи без срока, а колонки recurrence и recurrence_until заполнены только у повторяющейся записи.
+
+Полная схема в виде DDL выглядит так, и в ней указаны все ограничения и индексы.
+
+    records
+      id               INTEGER PRIMARY KEY
+      user_id          INTEGER NOT NULL DEFAULT 1
+      type             VARCHAR(20) NOT NULL       CHECK IN (task, meeting, reminder)
+      title            VARCHAR(500) NOT NULL      CHECK length(trim(title)) > 0
+      raw_text         TEXT
+      datetime         DATETIME                   локальное время без зоны
+      created_at       DATETIME NOT NULL
+      status           VARCHAR(20) NOT NULL       CHECK IN (pending, done, cancelled)
+      recurrence       VARCHAR(16)                daily, weekdays, weekly, monthly, yearly
+      recurrence_until DATETIME
+
+      INDEX ix_records_user_datetime      (user_id, datetime)
+      INDEX ix_records_user_type_datetime (user_id, type, datetime)
+      INDEX ix_records_user_status        (user_id, status)
+      INDEX ix_records_user_created       (user_id, created_at)
+      INDEX ix_records_recurring          (user_id, datetime) WHERE recurrence IS NOT NULL
+
+    record_embeddings
+      record_id  INTEGER PRIMARY KEY REFERENCES records(id) ON DELETE CASCADE
+      model      VARCHAR(200) NOT NULL
+      text_hash  VARCHAR(40) NOT NULL
+      dim        INTEGER NOT NULL
+      vector     BLOB NOT NULL
+      updated_at DATETIME NOT NULL
+
 Таблица record_embeddings хранит векторы для семантического поиска, и каждая её строка ссылается на запись через внешний ключ с ON DELETE CASCADE. Векторы лежат отдельно, потому что без библиотеки sentence-transformers эта таблица остаётся пустой, а основная таблица не растёт. Колонка text_hash содержит хеш SHA-1 от заголовка и исходной фразы, и по нему репозиторий видит, что текст изменился и вектор нужно пересчитать.
 
 Виртуальная таблица records_fts содержит полнотекстовый индекс FTS5 по колонкам title и raw_text. Три триггера records_fts_ai, records_fts_au и records_fts_ad обновляют индекс при вставке, изменении и удалении записи, поэтому индекс остаётся точным даже тогда, когда другой модуль пишет в records напрямую через ORM. Вспомогательная таблица records_fts_vocab показывает словарь индекса, и поиск по опечаткам берёт из неё слова, которые есть в базе.
@@ -160,7 +190,7 @@ FTS5 возвращает до пятидесяти кандидатов, а з�
 
             init_storage(engine)
 
-Файл backend/schemas/record.py в ветке alexasadullin совпадает с версией из ветки NLU байт в байт, поэтому он сливается без конфликта. Это исправление было необходимо, потому что в исходной заготовке поле datetime перекрывало одноимённый тип, и pydantic принимал в этом поле только None. Ветки feat/frontend-nikita и feat/voice-module не затрагивают файлы слоя данных, поэтому слияние с ними конфликтов не даёт.
+Файл backend/schemas/record.py в ветке alexasadullin совпадает с версией из ветки NLU байт в байт, поэтому он сливается без конфликта. Это исправление было необходимо, потому что в исходной заготовке поле datetime перекрывало одноимённый тип, и pydantic принимал в этом поле только None. Ветка alexasadullin не меняет README.md, потому что ветка NLU уже заполнила его, поэтому после слияния в README достаточно добавить ссылку на этот документ. Ветки feat/frontend-nikita и feat/voice-module не затрагивают файлы слоя данных, поэтому слияние с ними конфликтов не даёт.
 
 ## Что можно улучшить
 
