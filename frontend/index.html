@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Голосовой Ассистент — Хакатон</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --accent: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --user-msg: #3730a3;
+      --assistant-msg: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 1rem 2rem;
+      background-color: rgba(30, 41, 59, 0.8);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge-live {
+      background: rgba(16, 185, 129, 0.2);
+      color: var(--accent);
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 1.5rem;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 1.5rem;
+      flex: 1;
+      width: 100%;
+    }
+
+    @media (max-width: 900px) {
+      .container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .chat-section {
+      display: flex;
+      flex-direction: column;
+      background-color: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 1rem;
+      overflow: hidden;
+      height: calc(100vh - 120px);
+    }
+
+    .chat-messages {
+      flex: 1;
+      padding: 1.5rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .msg {
+      max-width: 80%;
+      padding: 0.85rem 1.15rem;
+      border-radius: 1rem;
+      line-height: 1.5;
+      font-size: 0.95rem;
+      animation: fadeIn 0.2s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      background-color: var(--user-msg);
+      border-bottom-right-radius: 0.25rem;
+    }
+
+    .msg.assistant {
+      align-self: flex-start;
+      background-color: var(--assistant-msg);
+      border-bottom-left-radius: 0.25rem;
+    }
+
+    .msg .meta {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 0.4rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .action-tag {
+      background: rgba(99, 102, 241, 0.25);
+      color: #a5b4fc;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .quick-prompts {
+      padding: 0.75rem 1.5rem;
+      background: rgba(15, 23, 42, 0.4);
+      display: flex;
+      gap: 0.5rem;
+      overflow-x: auto;
+      border-top: 1px solid var(--card-border);
+    }
+
+    .quick-chip {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 0.35rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+
+    .quick-chip:hover {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    .chat-input-bar {
+      padding: 1rem 1.5rem;
+      background: var(--card-bg);
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .input-field {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 0.75rem 1rem;
+      border-radius: 0.75rem;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-field:focus {
+      border-color: var(--primary);
+    }
+
+    .btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: background 0.15s;
+    }
+
+    .btn:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-mic {
+      background: #334155;
+      padding: 0.75rem;
+      border-radius: 50%;
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .btn-mic.recording {
+      background: var(--danger);
+      animation: pulse 1.2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      height: calc(100vh - 120px);
+    }
+
+    .sidebar-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 1rem;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .sidebar-card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .events-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      padding-right: 0.25rem;
+    }
+
+    .event-item {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 0.6rem;
+      padding: 0.75rem;
+      font-size: 0.85rem;
+    }
+
+    .event-item .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.35rem;
+    }
+
+    .event-title {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .event-time {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+    }
+
+    .badge-type {
+      font-size: 0.65rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .badge-task { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+    .badge-meeting { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+    .badge-reminder { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>
+      <span>🎙️</span> Voice Assistant <span class="badge-live">Online</span>
+    </h1>
+    <div>
+      <label style="font-size: 0.85rem; color: var(--text-muted); cursor: pointer;">
+        <input type="checkbox" id="ttsToggle" checked> Озвучивать ответы
+      </label>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="chat-section">
+      <div class="chat-messages" id="chatMessages">
+        <div class="msg assistant">
+          Здравствуйте! Я ваш голосовой ассистент. Могу помочь запланировать встречу, записать задачу или найти ваши планы.
+          <div class="meta">Готов к работе</div>
+        </div>
+      </div>
+
+      <div class="quick-prompts">
+        <div class="quick-chip" onclick="sendQuick('Напомни мне завтра в 10 утра позвонить Ивану')">Напомни завтра позвонить Ивану</div>
+        <div class="quick-chip" onclick="sendQuick('Добавь встречу с командой завтра в 15:00')">Встреча с командой в 15:00</div>
+        <div class="quick-chip" onclick="sendQuick('Поставь встречу с дизайнером в четверг')">Встреча без времени (уточнение)</div>
+        <div class="quick-chip" onclick="sendQuick('Что у меня сегодня?')">Что у меня сегодня?</div>
+        <div class="quick-chip" onclick="sendQuick('Найди задачу про презентацию')">Поиск презентации</div>
+      </div>
+
+      <div class="chat-input-bar">
+        <button class="btn btn-mic" id="micBtn" title="Голосовой ввод">
+          <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          </svg>
+        </button>
+        <input type="text" class="input-field" id="chatInput" placeholder="Скажите или напишите команду..." autofocus>
+        <button class="btn" id="sendBtn">Отправить</button>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="sidebar-card">
+        <h2>
+          <span>📋 База событий</span>
+          <button class="btn" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;" onclick="loadEvents()">Обновить</button>
+        </h2>
+        <input type="text" id="searchInput" class="input-field" placeholder="Поиск по событиям..." style="margin-bottom: 0.75rem; padding: 0.5rem;" oninput="searchEvents(this.value)">
+        <div class="events-list" id="eventsList">
+          <div style="color: var(--text-muted); font-size: 0.85rem;">Загрузка событий...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <audio id="audioPlayer" style="display: none;"></audio>
+
+  <script>
+    const sessionId = "session_" + Math.random().toString(36).substring(2, 9);
+    const messagesEl = document.getElementById("chatMessages");
+    const inputEl = document.getElementById("chatInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const micBtn = document.getElementById("micBtn");
+    const eventsList = document.getElementById("eventsList");
+    const audioPlayer = document.getElementById("audioPlayer");
+    const ttsToggle = document.getElementById("ttsToggle");
+
+    let isRecording = false;
+    let mediaRecorder = null;
+    let audioChunks = [];
+
+    function addMessage(role, text, action = null) {
+      const msg = document.createElement("div");
+      msg.className = `msg ${role}`;
+      let content = text;
+      let metaHtml = "";
+
+      if (action) {
+        metaHtml = `<div class="meta"><span class="action-tag">${action.type}</span> <span>${action.status}</span></div>`;
+      }
+      msg.innerHTML = `<div>${content}</div>${metaHtml}`;
+      messagesEl.appendChild(msg);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function sendMessage(text) {
+      const clean = text.trim();
+      if (!clean) return;
+      inputEl.value = "";
+      addMessage("user", clean);
+
+      try {
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, text: clean })
+        });
+        const data = await res.json();
+        if (res.ok && data.reply_text) {
+          addMessage("assistant", data.reply_text, data.action);
+          loadEvents();
+          if (ttsToggle.checked && data.reply_text) {
+            playTts(data.reply_text);
+          }
+        } else {
+          addMessage("assistant", data.detail || "Не удалось обработать запрос.");
+        }
+      } catch (err) {
+        addMessage("assistant", "Ошибка связи с сервером.");
+      }
+    }
+
+    async function playTts(text) {
+      try {
+        const res = await fetch("/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text })
+        });
+        const data = await res.json();
+        if (data.audio_url) {
+          audioPlayer.src = data.audio_url;
+          audioPlayer.play().catch(e => console.log("Auto-play error:", e));
+        }
+      } catch (err) {
+        console.error("TTS error:", err);
+      }
+    }
+
+    function sendQuick(text) {
+      inputEl.value = text;
+      sendMessage(text);
+    }
+
+    sendBtn.addEventListener("click", () => sendMessage(inputEl.value));
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendMessage(inputEl.value);
+    });
+
+    // Микрофон и STT (с автодетекцией кодека браузера)
+    micBtn.addEventListener("click", async () => {
+      if (!isRecording) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const mimeType = (typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus"))
+            ? "audio/webm;codecs=opus"
+            : (typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm")
+              ? "audio/webm"
+              : "audio/mp4");
+          const ext = mimeType.includes("mp4") ? "mp4" : "webm";
+
+          mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) audioChunks.push(e.data);
+          };
+
+          mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunks, { type: mimeType });
+            const formData = new FormData();
+            formData.append("audio", audioBlob, `recording.${ext}`);
+
+            try {
+              addMessage("assistant", "Распознаю речь...");
+              const sttRes = await fetch("/stt", { method: "POST", body: formData });
+              const sttData = await sttRes.json();
+              if (sttData.text && sttData.text.trim()) {
+                inputEl.value = sttData.text;
+                sendMessage(sttData.text);
+              } else {
+                addMessage("assistant", "Не удалось разобрать речь, повторите пожалуйста.");
+              }
+            } catch (err) {
+              addMessage("assistant", "Ошибка распознавания аудио.");
+            }
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          micBtn.classList.add("recording");
+        } catch (err) {
+          alert("Не удалось получить доступ к микрофону: " + err.message);
+        }
+      } else {
+        mediaRecorder.stop();
+        isRecording = false;
+        micBtn.classList.remove("recording");
+      }
+    });
+
+    async function loadEvents() {
+      try {
+        const res = await fetch("/events");
+        const data = await res.json();
+        renderEvents(data.items || []);
+      } catch (err) {
+        eventsList.innerHTML = `<div style="color: var(--danger)">Ошибка загрузки событий</div>`;
+      }
+    }
+
+    async function searchEvents(q) {
+      if (!q.trim()) {
+        loadEvents();
+        return;
+      }
+      try {
+        const res = await fetch(`/events/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        renderEvents(data.items || []);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function renderEvents(items) {
+      if (!items || items.length === 0) {
+        eventsList.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem;">Записей пока нет.</div>`;
+        return;
+      }
+      eventsList.innerHTML = items.map(it => {
+        const dtStr = it.datetime ? new Date(it.datetime).toLocaleString("ru-RU", { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : "Без срока";
+        return `
+          <div class="event-item">
+            <div class="top">
+              <span class="badge-type badge-${it.type}">${it.type}</span>
+              <span class="event-time">${dtStr}</span>
+            </div>
+            <div class="event-title">${it.title}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    loadEvents();
+  </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-﻿from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     tts_provider: str = "edge"
     tts_voice: str = "ru-RU-DmitryNeural"
+
+    llm_base_url: str | None = None
+    tts_output_dir: str = "./data/tts"
 
     db_path: str = "./data/sqlite.db"
 

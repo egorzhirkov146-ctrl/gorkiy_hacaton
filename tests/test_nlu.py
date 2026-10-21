@@ -272,6 +272,14 @@ def test_bonus_cancel_meeting(nlu, fixed_now):
         ("через полчаса", 20, (13, 30)),
         ("сегодня в 18:00", 20, (18, 0)),
         ("послезавтра в 12:00", 22, (12, 0)),
+        ("через час", 20, (14, 0)),
+        ("через пару часов", 20, (15, 0)),
+        ("через день", 21, (13, 0)),
+        ("через неделю", 27, (13, 0)),
+        ("в 3 часа дня", 20, (15, 0)),
+        ("в 8 вечера", 20, (20, 0)),
+        ("в полдень", 21, (12, 0)),
+        ("в полночь", 21, (0, 0)),
     ]
 )
 def test_date_parser_variations(parser, fixed_now, phrase, expected_day, expected_time):
@@ -282,6 +290,27 @@ def test_date_parser_variations(parser, fixed_now, phrase, expected_day, expecte
         assert (p.dt.hour, p.dt.minute) == expected_time
     else:
         assert (p.dt.hour, p.dt.minute, p.dt.second) == expected_time
+
+
+def test_root_nlu_module_import():
+    import nlu
+    res = nlu.parse_user_intent("В пятницу отправить отчет")
+    assert res.intent == "create_task"
+    assert "отчет" in res.title.lower()
+
+
+def test_tools_definitions_format():
+    from backend.nlu.tools import TOOLS_DEFINITIONS
+    tool_names = {t["function"]["name"] for t in TOOLS_DEFINITIONS}
+    assert "create_task" in tool_names
+    assert "create_meeting" in tool_names
+    assert "list_events" in tool_names
+    assert "search_events" in tool_names
+    assert "ask_clarification" in tool_names
+    assert "update_event" in tool_names
+    assert "complete_event" in tool_names
+    assert "delete_event" in tool_names
+
 
 
 def test_chat_api_endpoint_flow(client):
@@ -322,3 +351,87 @@ def test_chat_api_endpoint_search(client):
     data = response.json()
     assert data["action"]["type"] == "search_events"
     assert data["needs_clarification"] is False
+
+
+def test_nlu_empty_and_whitespace_input(nlu, fixed_now):
+    res1 = nlu.parse("", now=fixed_now)
+    assert res1.intent == "conversation"
+    assert res1.reply_text is not None
+    assert len(res1.reply_text) > 0
+
+    res2 = nlu.parse("   ", now=fixed_now)
+    assert res2.intent == "conversation"
+    assert res2.reply_text is not None
+
+
+def test_nlu_conversational_queries(nlu, fixed_now):
+    for phrase in ["Привет", "Здравствуйте", "Спасибо огромное", "Помощь", "Что ты умеешь?"]:
+        res = nlu.parse(phrase, now=fixed_now)
+        assert res.intent == "conversation"
+        assert res.reply_text is not None
+        assert res.tool_called is None
+
+
+def test_nlu_weekday_prepositions_and_inflections(parser, fixed_now):
+    # fixed_now = Tuesday 2026-10-20 13:00
+    res_fri = parser.parse("до пятницы", base_dt=fixed_now)
+    assert res_fri.dt is not None
+    assert res_fri.dt.day == 23
+
+    res_wed = parser.parse("к среде", base_dt=fixed_now)
+    assert res_wed.dt is not None
+    assert res_wed.dt.day == 21
+
+    res_tue = parser.parse("во вторник в 14:30", base_dt=fixed_now)
+    assert res_tue.dt is not None
+    assert res_tue.dt.day == 20
+    assert (res_tue.dt.hour, res_tue.dt.minute) == (14, 30)
+
+    res_next_wed = parser.parse("на следующей неделе в среду", base_dt=fixed_now)
+    assert res_next_wed.dt is not None
+    # Следующая среда после 20.10: 28.10
+    assert res_next_wed.dt.day == 28
+
+
+def test_nlu_number_words_delta(parser, fixed_now):
+    res_20m = parser.parse("через двадцать минут", base_dt=fixed_now)
+    assert res_20m.dt is not None
+    assert (res_20m.dt.hour, res_20m.dt.minute) == (13, 20)
+
+    res_30m = parser.parse("через тридцать минут", base_dt=fixed_now)
+    assert res_30m.dt is not None
+    assert (res_30m.dt.hour, res_30m.dt.minute) == (13, 30)
+
+
+def test_clarification_with_day_after_tomorrow(nlu, fixed_now):
+    # Turn 1: встреча без времени на послезавтра
+    res1 = nlu.parse("Встреча с партнерами послезавтра", now=fixed_now)
+    assert res1.needs_clarification is True
+    assert res1.intent == "ask_clarification"
+    assert res1.datetime.day == 22
+
+
+    # Turn 2: пользователь уточняет "в 14:00"
+    history = [
+        MessageIn(role="user", content="Встреча с партнерами послезавтра"),
+        MessageIn(role="assistant", content="Уточните, пожалуйста, время встречи?")
+    ]
+    res2 = nlu.parse("в 14:00", history=history, now=fixed_now)
+    assert res2.needs_clarification is False
+    assert res2.intent == "create_meeting"
+    assert res2.datetime == datetime(2026, 10, 22, 14, 0)
+    assert "партнер" in res2.title.lower()
+
+
+def test_chat_api_conversational_and_empty(client):
+    res_empty = client.post("/chat", json={"session_id": "test-chat-conv", "text": "   "})
+    assert res_empty.status_code == 200
+    data_empty = res_empty.json()
+    assert data_empty["action"]["type"] == "conversation"
+
+    res_greet = client.post("/chat", json={"session_id": "test-chat-conv", "text": "Привет!"})
+    assert res_greet.status_code == 200
+    data_greet = res_greet.json()
+    assert data_greet["action"]["type"] == "conversation"
+    assert "помочь" in data_greet["reply_text"].lower() or "привет" in data_greet["reply_text"].lower() or "здравствуйте" in data_greet["reply_text"].lower()
+

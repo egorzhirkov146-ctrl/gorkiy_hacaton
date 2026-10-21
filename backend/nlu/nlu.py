@@ -27,6 +27,7 @@ class NLUResult:
     datetime: Optional[datetime] = None
     datetime_iso: Optional[str] = None
     has_explicit_time: bool = False
+    has_explicit_date: bool = False
     period: Optional[str] = None
     period_start: Optional[datetime] = None
     period_end: Optional[datetime] = None
@@ -36,7 +37,10 @@ class NLUResult:
     needs_clarification: bool = False
     clarification_question: Optional[str] = None
     missing_field: Optional[str] = None
+    reply_text: Optional[str] = None
+    tool_called: Optional[str] = None
     raw_arguments: dict[str, Any] = field(default_factory=dict)
+
 
     def to_action_out(self) -> ActionOut:
         status = "pending" if self.needs_clarification else "ok"
@@ -59,6 +63,16 @@ class NLUModule:
         history: Optional[list[MessageIn]] = None,
         now: Optional[datetime] = None
     ) -> NLUResult:
+        if not text or not text.strip():
+            return NLUResult(
+                intent="conversation",
+                raw_text=text or "",
+                reply_text="Я вас слушаю. Чем могу помочь?",
+                clarification_question="Я вас слушаю. Чем могу помочь?",
+                tool_called=None,
+                raw_arguments={},
+            )
+
         current_dt = now or datetime.now()
         system_content = build_system_prompt(current_dt, tz_name=settings.tz)
 
@@ -82,10 +96,12 @@ class NLUModule:
                 datetime=parsed_dt.dt,
                 datetime_iso=parsed_dt.iso,
                 has_explicit_time=parsed_dt.has_explicit_time,
+                has_explicit_date=parsed_dt.has_explicit_date,
                 period=parsed_dt.period,
                 period_start=parsed_dt.period_start,
                 period_end=parsed_dt.period_end,
                 record_type=validated_task.record_type,
+                tool_called="create_task",
                 raw_arguments=args
             )
 
@@ -98,11 +114,17 @@ class NLUModule:
                     intent="ask_clarification",
                     raw_text=text,
                     title=validated_meeting.title,
+                    datetime=parsed_dt.dt,
+                    datetime_iso=parsed_dt.iso,
+                    has_explicit_time=False,
+                    has_explicit_date=parsed_dt.has_explicit_date,
                     needs_clarification=True,
                     clarification_question="На какое время поставить встречу?",
                     missing_field="time",
+                    tool_called="create_meeting",
                     raw_arguments=args
                 )
+
 
             return NLUResult(
                 intent="create_meeting",
@@ -150,14 +172,23 @@ class NLUModule:
 
         elif tool_name == "ask_clarification":
             validated_clarification = AskClarificationArgs(**args)
+            p_data = args.get("partial_data") or {}
+            parsed_dt = self.date_parser.parse(text, base_dt=current_dt)
             return NLUResult(
                 intent="ask_clarification",
                 raw_text=text,
+                title=p_data.get("title"),
+                datetime=parsed_dt.dt,
+                datetime_iso=parsed_dt.iso,
+                has_explicit_time=parsed_dt.has_explicit_time,
+                has_explicit_date=parsed_dt.has_explicit_date,
                 needs_clarification=True,
                 clarification_question=validated_clarification.question,
                 missing_field=validated_clarification.missing_field,
+                tool_called="ask_clarification",
                 raw_arguments=args
             )
+
 
         elif tool_name == "update_event":
             validated_update = UpdateEventArgs(**args)
@@ -170,6 +201,8 @@ class NLUModule:
                 datetime=parsed_dt.dt,
                 datetime_iso=parsed_dt.iso,
                 has_explicit_time=parsed_dt.has_explicit_time,
+                has_explicit_date=parsed_dt.has_explicit_date,
+                tool_called="update_event",
                 raw_arguments=args
             )
 
@@ -179,6 +212,7 @@ class NLUModule:
                 intent="complete_event",
                 raw_text=text,
                 target_query=validated_complete.target_query,
+                tool_called="complete_event",
                 raw_arguments=args
             )
 
@@ -188,8 +222,21 @@ class NLUModule:
                 intent="delete_event",
                 raw_text=text,
                 target_query=validated_delete.target_query,
+                tool_called="delete_event",
                 raw_arguments=args
             )
+
+        elif tool_name == "conversation":
+            reply = args.get("reply") or "Здравствуйте! Чем могу помочь?"
+            return NLUResult(
+                intent="conversation",
+                raw_text=text,
+                reply_text=reply,
+                clarification_question=reply,
+                tool_called=None,
+                raw_arguments=args,
+            )
+
 
         return NLUResult(
             intent="unknown",

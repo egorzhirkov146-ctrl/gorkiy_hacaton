@@ -7,14 +7,28 @@ from openai import OpenAI
 from backend.config import settings
 from backend.nlu.tools import TOOLS_DEFINITIONS
 from backend.nlu.prompts import build_system_prompt
-from backend.nlu.date_parser import RussianDateParser
+from backend.nlu.date_parser import RussianDateParser, RU_WEEKDAYS
 
 
 class LLMClient:
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ):
         self.api_key = api_key or settings.llm_api_key
         self.model = model or settings.llm_model
-        self.client = OpenAI(api_key=self.api_key) if self.api_key and not self.api_key.startswith("sk-...") else None
+        self.base_url = base_url or settings.llm_base_url
+
+        if self.base_url or (self.api_key and self.api_key not in ("", "sk-...", "your-key-here")):
+            self.client = OpenAI(
+                api_key=self.api_key or "not-needed",
+                base_url=self.base_url,
+            )
+        else:
+            self.client = None
+
         self.date_parser = RussianDateParser(default_tz=settings.tz)
 
     def is_live(self) -> bool:
@@ -45,6 +59,8 @@ class LLMClient:
                     name = tool_call.function.name
                     args = json.loads(tool_call.function.arguments)
                     return name, args, message.content
+                elif message.content:
+                    return "conversation", {"reply": message.content.strip()}, message.content
             except Exception:
                 pass
 
@@ -62,8 +78,36 @@ class LLMClient:
         messages: list[dict[str, str]],
         now: datetime
     ) -> tuple[str, dict[str, Any], Optional[str]]:
-        clean = text.lower().strip()
+        clean = (text or "").lower().strip()
+        if not clean:
+            return "unknown", {}, None
 
+        # 1. Вежливый диалог, приветствия, помощь и благодарности
+        if re.search(r"^(?:привет|здравствуй|здравствуйте|добрый день|доброе утро|добрый вечер|салют|хай)\b", clean):
+            return "conversation", {
+                "reply": "Здравствуйте! Я ваш голосовой ассистент. Могу записать задачу, назначить встречу, найти старые записи или показать расписание.",
+                "sub_type": "greeting"
+            }, None
+
+        if re.search(r"^(?:спасибо|благодарю|отлично|супер|спасибо большое)\b", clean):
+            return "conversation", {
+                "reply": "Пожалуйста! Обращайтесь, если потребуется что-то запланировать.",
+                "sub_type": "thanks"
+            }, None
+
+        if re.search(r"^(?:пока|до свидания|всего доброго|до встречи|прощай)\b", clean):
+            return "conversation", {
+                "reply": "До свидания! Хорошего вам дня!",
+                "sub_type": "bye"
+            }, None
+
+        if re.search(r"^(?:помощь|справка|что ты умеешь|как пользоваться|команды|help)\b", clean):
+            return "conversation", {
+                "reply": "Я умею создавать задачи и напоминания ('Напомни завтра в 10 утра позвонить Ивану'), планировать встречи ('Добавь встречу с дизайнером в четверг в 11'), показывать планы ('Что у меня сегодня?') и искать старые дела ('Найди задачу про договор').",
+                "sub_type": "help"
+            }, None
+
+        # 2. Уточняющий диалог (ответ пользователя на вопрос ассистента о времени)
         if len(messages) >= 2:
             last_assistant = ""
             for m in reversed(messages[:-1]):
@@ -71,11 +115,16 @@ class LLMClient:
                     last_assistant = m.get("content", "").lower()
                     break
 
-            if "на какое время" in last_assistant or "какое время" in last_assistant:
+            if "время" in last_assistant or "во сколько" in last_assistant:
                 parsed_t, has_t = self.date_parser.parse_time_component(clean)
-                if has_t or self.date_parser.parse(clean, base_dt=now).has_explicit_time:
+                parsed_self = self.date_parser.parse(clean, base_dt=now)
+
+
+                # Должно быть указано именно время! Если пользователь повторил запрос без времени, не считаем это ответом на время.
+                if has_t or parsed_self.has_explicit_time:
                     meeting_title = "Встреча"
-                    prev_date_str = "завтра"
+                    prev_date: Optional[datetime] = None
+
                     for m in reversed(messages[:-1]):
                         if m.get("role") == "user":
                             u_prev = m.get("content", "")
@@ -83,25 +132,38 @@ class LLMClient:
                                 match_m = re.search(r"встреч[уаеы]?\s+(?:с\s+)?([^,.?!]+)", u_prev, re.IGNORECASE)
                                 if match_m:
                                     raw_sub = match_m.group(1).strip()
-                                    cleaned_sub = re.sub(r"\b(завтра|сегодня|послезавтра|в\s+\w+)\b", "", raw_sub, flags=re.IGNORECASE).strip()
+                                    cleaned_sub = re.sub(
+                                        r"\b(завтра|сегодня|послезавтра|вчера|до конца недели|на следующей неделе|в\s+\w+)\b",
+                                        "", raw_sub, flags=re.IGNORECASE
+                                    ).strip()
                                     meeting_title = f"Встреча с {cleaned_sub}" if cleaned_sub else "Встреча"
-                                if "завтра" in u_prev.lower():
-                                    prev_date_str = "завтра"
-                                elif "сегодня" in u_prev.lower():
-                                    prev_date_str = "сегодня"
-                                elif "четверг" in u_prev.lower():
-                                    prev_date_str = "в четверг"
-                                elif "пятниц" in u_prev.lower():
-                                    prev_date_str = "в пятницу"
+
+                                parsed_prev = self.date_parser.parse(u_prev, base_dt=now)
+                                if parsed_prev.dt:
+                                    prev_date = parsed_prev.dt
                                 break
 
-                    full_datetime = f"{prev_date_str} {text}"
+                    has_explicit_date_word = bool(re.search(
+                        r"\b(?:сегодня|завтра|послезавтра|до\s+конца\s+недели|на\s+следующей\s+неделе|на\s+этой\s+неделе|на\s+выходных|"
+                        r"(?:в|во|до|к|на)?\s*(?:понедельник\w*|вторник\w*|сред\w+|четверг\w*|пятниц\w+|суббот\w+|воскресень\w+))\b",
+                        clean
+                    ))
+
+                    if has_explicit_date_word and parsed_self.dt and parsed_self.has_explicit_time:
+                        full_datetime = parsed_self.dt.isoformat()
+                    else:
+                        from datetime import timedelta, time as dt_time
+                        base_d = prev_date.date() if prev_date else (now + timedelta(days=1)).date()
+                        time_val = parsed_t or (parsed_self.dt.time() if parsed_self.dt else dt_time(12, 0))
+                        full_datetime = datetime.combine(base_d, time_val).isoformat()
+
                     return "create_meeting", {
                         "title": meeting_title,
                         "datetime_str": full_datetime,
                         "raw_text": f"{meeting_title} {full_datetime}"
                     }, None
 
+        # 3. Перенос / изменение событий (update_event)
         if re.search(r"\b(перенеси|сдвинь|отложи)\b", clean):
             target = "её"
             if "встреч" in clean:
@@ -120,6 +182,7 @@ class LLMClient:
                 "new_datetime_str": new_date or "завтра"
             }, None
 
+        # 4. Отметка выполненным (complete_event)
         if re.search(r"(?:отметь\b.*\bвыполнен|выполнен|сделал\b|выполнил\b|заверши\b)", clean):
             target = "задача"
             match = re.search(r"(?:отметь\s+)?(?:задач[уаеы]|дело|встреч[уаеы])\s+([^,.?!]+?)(?:\s+выполнен|\s+завершен|$)", clean)
@@ -127,6 +190,7 @@ class LLMClient:
                 target = match.group(1).strip()
             return "complete_event", {"target_query": target}, None
 
+        # 5. Удаление события (delete_event)
         if re.search(r"\b(удали|отмени|стереть)\b", clean):
             target = "запись"
             match = re.search(r"(?:удали|отмени|стереть)\s+([^,.?!]+)", clean)
@@ -134,30 +198,22 @@ class LLMClient:
                 target = match.group(1).strip()
             return "delete_event", {"target_query": target}, None
 
-        if re.search(r"\b(найди|когда у меня была|я когда-то ставил|вспомни|поищи)\b", clean):
-            q = clean
-            for prefix in [
-                "найди задачу про", "найди задачу о", "найди задачу", "найди встречу про", "найди встречу", "найди",
-                "когда у меня была встреча с", "когда у меня была встреча", "когда у меня была",
-                "я когда-то ставил задачу по", "я когда-то ставил задачу про", "я когда-то ставил задачу",
-                "я когда-то ставил", "поищи", "найди ее", "найди её"
-            ]:
-                if q.startswith(prefix):
-                    q = q[len(prefix):].strip()
-                    break
-
-            q = re.sub(r"[,.?!]", "", q).strip()
-            q = re.sub(r"\b(найди|ее|её)\b", "", q).strip()
-            rec_type = "meeting" if "встреч" in clean else ("task" if "задач" in clean else "all")
-            return "search_events", {"query": q or text, "record_type": rec_type}, None
-
-        if re.search(r"\b(что у меня|какие планы|покажи мои встречи|есть ли у меня|какие задачи|что запланировано|покажи расписание|планы на)\b", clean):
+        # 6. Получение планов и расписания (list_events)
+        list_pattern = (
+            r"\b(что у меня|что у нас|какие у меня|какие у нас|какие планы|какие задачи|какие встречи|"
+            r"список задач|список встреч|покажи мои|покажи задачи|покажи встречи|покажи все|покажи планы|"
+            r"покажи расписание|есть ли у меня|есть ли задачи|есть ли встречи|что запланировано|планы на|"
+            r"что в планах|расписание на|мои планы|мои встречи|мои задачи)\b"
+        )
+        if re.search(list_pattern, clean):
             period = "all"
-            if "сегодня" in clean:
+            if re.search(r"\bсегодня\b", clean):
                 period = "today"
-            elif "завтра" in clean:
+            elif re.search(r"\bзавтра\b", clean) and "послезавтра" not in clean:
                 period = "tomorrow"
-            elif "на эту неделю" in clean or "на этой неделе" in clean:
+            elif "послезавтра" in clean:
+                period = "custom"
+            elif "на эту неделю" in clean or "на этой неделе" in clean or "до конца недели" in clean:
                 period = "this_week"
             elif "на следующей неделе" in clean or "на следующую неделю" in clean:
                 period = "next_week"
@@ -165,12 +221,35 @@ class LLMClient:
             rec_type = "all"
             if "встреч" in clean:
                 rec_type = "meeting"
-            elif "задач" in clean:
+            elif "задач" in clean or "напоминан" in clean:
                 rec_type = "task"
 
             return "list_events", {"period": period, "record_type": rec_type}, None
 
-        if "встреч" in clean:
+        # 7. Поиск старых записей (search_events)
+        search_pattern = r"\b(найди|поищи|поиск|вспомни|где|когда у меня была|я когда-то ставил|что там с|что там по)\b"
+        if re.search(search_pattern, clean):
+            q = clean
+            for prefix in [
+                "найди мне задачу про", "найди мне задачу по", "найди мне задачу о", "найди мне задачу", "найди мне",
+                "найди задачу про", "найди задачу по", "найди задачу о", "найди задачу",
+                "найди встречу про", "найди встречу с", "найди встречу", "найди",
+                "когда у меня была встреча с", "когда у меня была встреча", "когда у меня была",
+                "я когда-то ставил задачу по", "я когда-то ставил задачу про", "я когда-то ставил задачу",
+                "я когда-то ставил", "поищи", "поиск", "вспомни про", "вспомни о", "вспомни",
+                "где моя", "где мой", "где", "что там с", "что там по", "найди ее", "найди её"
+            ]:
+                if q.startswith(prefix):
+                    q = q[len(prefix):].strip()
+                    break
+
+            q = re.sub(r"[,.?!]", "", q).strip()
+            q = re.sub(r"\b(найди|ее|её|задачу|встречу)\b", "", q).strip()
+            rec_type = "meeting" if "встреч" in clean else ("task" if "задач" in clean else "all")
+            return "search_events", {"query": q or text, "record_type": rec_type}, None
+
+        # 8. Создание встречи (create_meeting или ask_clarification)
+        if "встреч" in clean or "созвон" in clean or "митинг" in clean:
             parsed_time, has_time = self.date_parser.parse_time_component(clean)
             has_explicit_date_or_time = self.date_parser.parse(clean, base_dt=now).has_explicit_time
 
@@ -178,7 +257,13 @@ class LLMClient:
             match = re.search(r"(?:добавь|создай|поставь|запланируй)?\s*встреч[уаеы]?\s*(?:с\s+)?([^,.?!]+)", clean)
             if match:
                 raw_sub = match.group(1).strip()
-                cleaned_sub = re.sub(r"\b(завтра|сегодня|послезавтра)\b|\bв\s+\d{1,2}:\d{2}\b|\b\d{1,2}:\d{2}\b|\bв\s+\d{1,2}\b|\bв\s+\w+\b", "", raw_sub).strip()
+                cleaned_sub = re.sub(
+                    r"\b(завтра|сегодня|послезавтра|вчера)\b|\bв\s+\d{1,2}[:.-]\d{2}\b|\b\d{1,2}[:.-]\d{2}\b|\bв\s+\d{1,2}\b|"
+                    r"\b(?:в|во|до|к|на)?\s*(?:понедельник\w*|вторник\w*|сред\w+|четверг\w*|пятниц\w+|суббот\w+|воскресень\w+)\b|"
+                    r"\b\d{1,2}\s*(?:ч|час|часа|часов)?\s*(?:утра|ночи|дня|вечера)\b|"
+                    r"\b(?:утра|ночи|дня|вечера)\b",
+                    "", raw_sub
+                ).strip()
                 cleaned_sub = re.sub(r"[\s:]+$", "", cleaned_sub).strip()
                 title = f"Встреча с {cleaned_sub}" if cleaned_sub else "Встреча"
             else:
@@ -193,7 +278,7 @@ class LLMClient:
                 }, None
 
             dt_extracted = clean
-            for trigger in ["добавь", "создай", "поставь", "у меня", "встреча", "встречу", "с командой", "с дизайнером"]:
+            for trigger in ["добавь", "создай", "поставь", "у меня", "встреча", "встречу", "созвон"]:
                 dt_extracted = re.sub(rf"\b{trigger}\b", "", dt_extracted).strip()
 
             return "create_meeting", {
@@ -202,38 +287,46 @@ class LLMClient:
                 "raw_text": text
             }, None
 
+        # 9. Создание задачи или напоминания (create_task)
         clean_task = text
         for trigger in [
-            "напомни мне", "напомни", "нужно", "поставь задачу", "создай задачу", "добавь задачу",
-            "поставить задачу", "напоминание"
+            r"^(?:пожалуйста,\s*)?напомни(?:ть)?(?:\s+мне)?\b",
+            r"^(?:поставь|создай|добавь|заведи)\s+(?:мне\s+)?(?:задачу|напоминание|заметку|дело)\b",
+            r"^(?:нужно|надо|необходимо|следует|хочу|планирую)\s+(?:сделать|поставить)?\b",
+            r"^(?:поставить|создать|добавить)\s+(?:задачу|напоминание)\b",
         ]:
-            if clean_task.lower().startswith(trigger):
-                clean_task = clean_task[len(trigger):].strip()
-                break
+            clean_task = re.sub(trigger, "", clean_task, flags=re.IGNORECASE).strip()
 
-        title = clean_task
+        dt_regex = re.compile(
+            r"\b(?:сегодня|завтра|послезавтра|до\s+конца\s+недели|на\s+следующей\s+неделе|на\s+этой\s+неделе|на\s+выходных|в\s+выходные|"
+            r"(?:в|во|до|к|на)?\s*(?:понедельник\w*|вторник\w*|сред\w+|четверг\w*|пятниц\w+|суббот\w+|воскресень\w+)|"
+            r"через\s+(?:полчаса|полтора\s+часа|пару\s+часов|пару\s+дней|час|часик|день|неделю|\w+\s*(?:час\w*|минут\w*|дн\w*|ден\w*|недел\w*))|"
+            r"(?:в|к|на)?\s*\d{1,2}[:.-]\d{2}|"
+            r"(?:в|к|на)?\s*\d{1,2}\s*(?:ч|час|часа|часов)?\s*(?:утра|ночи|дня|вечера)|"
+            r"(?:в|к|на)\s+\d{1,2}\s*(?:ч|час|часа|часов)?\b|"
+            r"утром|днем|днём|вечером|в\s+полдень|в\s+полночь)\b",
+            re.IGNORECASE
+        )
+
+        found_matches = list(dt_regex.finditer(clean_task))
         dt_extracted = None
+        title = clean_task
 
-        match_delta = re.search(r"\b(через\s+(?:полчаса|[\w\d]+\s*(?:час\w*|минут\w*|дн\w*|ден\w*)))\b", clean_task, re.IGNORECASE)
-        if match_delta:
-            dt_extracted = match_delta.group(1).strip()
-            title = re.sub(rf"(?i)\b{re.escape(dt_extracted)}\b", "", title).strip()
-        else:
-            date_triggers = [
-                "завтра в 10 утра", "завтра в 15:00", "до конца недели", "на следующей неделе",
-                "в пятницу", "в четверг", "сегодня", "завтра", "послезавтра"
-            ]
-            for dt_pattern in date_triggers:
-                if dt_pattern in clean.lower():
-                    dt_extracted = dt_pattern
-                    title = re.sub(rf"(?i)\b{dt_pattern}\b", "", title).strip()
-                    break
+        if found_matches:
+            dt_parts = [m.group(0).strip() for m in found_matches]
+            dt_extracted = " ".join(dt_parts)
+            for m in reversed(found_matches):
+                title = title[:m.start()] + " " + title[m.end():]
 
-        title = re.sub(r"^(?:что|чтобы|надо|нужно|сделать|о)\s+", "", title, flags=re.IGNORECASE).strip()
+        title = re.sub(r"^(?:что|чтобы|надо|нужно|сделать|о|про|быть)\s+", "", title.strip(), flags=re.IGNORECASE)
+        title = re.sub(r"\s+", " ", title).strip(" ,.?!")
 
-        rec_type = "reminder" if "напомни" in clean else "task"
+        if not title:
+            title = text.strip()
+
+        rec_type = "reminder" if re.search(r"\bнапомни\b", clean) else "task"
         return "create_task", {
-            "title": title or text,
+            "title": title,
             "datetime_str": dt_extracted,
             "record_type": rec_type,
             "raw_text": text

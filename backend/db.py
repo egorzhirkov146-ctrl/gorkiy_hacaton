@@ -1,4 +1,4 @@
-﻿from sqlalchemy import create_engine
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from backend.config import settings
@@ -16,8 +16,14 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
+import os
+from pathlib import Path
+
+
 def init_db() -> None:
-    # from backend.models import record, message  # noqa: F401
+    from backend.models import Record, Message  # noqa: F401
+    db_file = Path(settings.db_path)
+    db_file.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
 
 
