@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f4ef">
+  <title>Голосовой помощник</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #202923;
+      --muted: #727b73;
+      --paper: #f6f4ef;
+      --card: #fffefa;
+      --green: #276b4a;
+      --line: #e8e5dc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--paper);
+      color: var(--ink);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(100% - 32px, 760px);
+      margin: 52px auto;
+    }
+    header { margin-bottom: 26px; }
+    h1 { margin: 0 0 6px; font-size: clamp(28px, 6vw, 40px); letter-spacing: -1.2px; }
+    header p, .hint { color: var(--muted); margin: 0; }
+    .chat, .events {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 12px 40px #243b2b0a;
+    }
+    .chat { min-height: 300px; padding: 20px; }
+    #messages { display: grid; gap: 14px; }
+    .msg { max-width: 88%; padding: 12px 15px; border-radius: 15px; white-space: pre-wrap; }
+    .user { justify-self: end; background: #e7efe8; border-bottom-right-radius: 5px; }
+    .assistant { justify-self: start; background: #f1f0eb; border-bottom-left-radius: 5px; }
+    .welcome { color: var(--muted); padding: 8px 2px 18px; }
+    form { display: flex; gap: 9px; margin-top: 18px; }
+    input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 13px 15px;
+      font: inherit;
+      background: #fff;
+      color: var(--ink);
+      outline-color: var(--green);
+    }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 0 17px;
+      min-height: 48px;
+      background: var(--green);
+      color: white;
+      font: inherit;
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: wait; }
+    #mic { min-width: 48px; padding: 0; display: grid; place-items: center; }
+    #mic svg { width: 22px; height: 22px; fill: currentColor; }
+    #mic.listening { background: #ac443a; }
+    .hint { margin: 11px 4px 0; font-size: 13px; }
+    .events { margin-top: 18px; padding: 20px; }
+    .events h2 { margin: 0 0 12px; font-size: 18px; }
+    #eventList { display: grid; gap: 8px; }
+    .event { padding: 10px 12px; border-radius: 10px; background: #f6f5f0; font-size: 14px; }
+    .empty { color: var(--muted); font-size: 14px; }
+    @media (max-width: 540px) {
+      main { margin: 28px auto; }
+      .chat { padding: 14px; }
+      form { gap: 7px; }
+      #send { padding: 0 12px; }
+      .msg { max-width: 96%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Ваш помощник</h1>
+    </header>
+    <section class="chat" aria-label="Диалог с помощником">
+      <div id="messages">
+        <div class="welcome">Например: «Напомни завтра в 10 позвонить Ивану» или «Что у меня на этой неделе?»</div>
+      </div>
+      <form id="form">
+        <input id="text" autocomplete="off" placeholder="Напишите сообщение…" aria-label="Ваше сообщение">
+        <button id="mic" type="button" title="Сказать голосом" aria-label="Сказать голосом">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-3.07A7 7 0 0 0 19 11h-2Z"/></svg>
+        </button>
+        <button id="send" type="submit">Отправить</button>
+      </form>
+      <p class="hint" id="hint"></p>
+    </section>
+    <section class="events" aria-label="Все записи">
+      <h2>Ваши записи</h2>
+      <div id="eventList"><span class="empty">Загрузка…</span></div>
+    </section>
+  </main>
+  <script>
+    const form = document.querySelector("#form");
+    const input = document.querySelector("#text");
+    const messages = document.querySelector("#messages");
+    const list = document.querySelector("#eventList");
+    const mic = document.querySelector("#mic");
+    const hint = document.querySelector("#hint");
+    let context = "";
+
+    function addMsg(text, who) {
+      const item = document.createElement("div");
+      item.className = `msg ${who}`;
+      item.textContent = text;
+      messages.append(item);
+      item.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+
+    async function loadEvents() {
+      try {
+        const res = await fetch("/api/events");
+        if (!res.ok) throw new Error("Не удалось загрузить записи.");
+        const events = await res.json();
+        list.replaceChildren();
+        if (!events.length) {
+          list.innerHTML = '<span class="empty">Пока записей нет.</span>';
+          return;
+        }
+        for (const event of events) {
+          const item = document.createElement("div");
+          item.className = "event";
+          const type = { task: "Задача", meeting: "Встреча", reminder: "Напоминание" }[event.kind] || "Событие";
+          const date = event.event_date ? new Date(`${event.event_date}T00:00:00`).toLocaleDateString("ru-RU") : "";
+          const when = [date, event.event_time].filter(Boolean).join(" в ");
+          item.textContent = `${type}: ${event.title}${when ? ` — ${when}` : ""}${event.status === "done" ? " · выполнено" : ""}`;
+          list.append(item);
+        }
+      } catch (err) {
+        list.textContent = err.message;
+      }
+    }
+
+    async function loadHistory() {
+      try {
+        const res = await fetch("/api/history");
+        if (!res.ok) throw new Error("Не удалось загрузить историю диалога.");
+        const history = await res.json();
+        messages.replaceChildren();
+        if (!history.length) {
+          const welcome = document.createElement("div");
+          welcome.className = "welcome";
+          welcome.textContent = "Например: «Напомни завтра в 10 позвонить Ивану» или «Что у меня на этой неделе?»";
+          messages.append(welcome);
+          return;
+        }
+        for (const message of history) {
+          addMsg(message.content, message.role === "user" ? "user" : "assistant");
+        }
+      } catch (err) {
+        messages.replaceChildren();
+        addMsg(err.message, "assistant");
+      }
+    }
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      addMsg(text, "user");
+      input.value = "";
+      document.querySelector("#send").disabled = true;
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, context })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Не удалось отправить сообщение.");
+        addMsg(data.reply, "assistant");
+        context = data.needs_reply ? data.context : "";
+        if ("speechSynthesis" in window) {
+          speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(data.reply);
+          utterance.lang = "ru-RU";
+          speechSynthesis.speak(utterance);
+        }
+        await loadEvents();
+      } catch (err) {
+        addMsg(err.message, "assistant");
+      } finally {
+        document.querySelector("#send").disabled = false;
+        input.focus();
+      }
+    });
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      mic.disabled = true;
+      hint.textContent = "В этом браузере нет голосового ввода. Можно общаться текстом.";
+    } else {
+      const recog = new SpeechRecognition();
+      recog.lang = "ru-RU";
+      recog.interimResults = false;
+      recog.maxAlternatives = 1;
+      mic.addEventListener("click", () => {
+        if (mic.classList.contains("listening")) {
+          recog.stop();
+          return;
+        }
+        try {
+          recog.start();
+          mic.classList.add("listening");
+          hint.textContent = "Слушаю…";
+        } catch {
+          hint.textContent = "Не удалось начать запись. Попробуйте ещё раз.";
+        }
+      });
+      recog.addEventListener("result", event => {
+        input.value = event.results[0][0].transcript;
+        input.focus();
+      });
+      recog.addEventListener("error", event => {
+        hint.textContent = event.error === "not-allowed"
+          ? "Разрешите браузеру использовать микрофон."
+          : "Не удалось распознать речь. Попробуйте ещё раз или напишите сообщение.";
+      });
+      recog.addEventListener("end", () => {
+        mic.classList.remove("listening");
+        if (hint.textContent === "Слушаю…") hint.textContent = "";
+      });
+    }
+
+    loadHistory();
+    loadEvents();
+  </script>
+</body>
+</html>
