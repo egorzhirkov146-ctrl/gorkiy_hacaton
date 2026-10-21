@@ -1,5 +1,5 @@
 import { demoSendMessage, getDemoEvents } from './demo.js';
-import { normalizeEvent } from '../utils/events.js';
+import { makeChatRequest, parseChatResponse, parseEventList, parseTtsResponse } from './backendContract.js';
 
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE !== 'false';
 const API = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -8,7 +8,7 @@ async function request(path, { method = 'GET', json, body, timeout = 30000 } = {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetch(`${API}${path}`, {
+    const res = await fetch(path.startsWith('/static/') ? path : `${API}${path}`, {
       method,
       headers: json === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: json === undefined ? body : JSON.stringify(json),
@@ -33,22 +33,13 @@ async function request(path, { method = 'GET', json, body, timeout = 30000 } = {
 export async function getEvents() {
   if (DEMO_MODE) return getDemoEvents();
   const res = await request('/events');
-  const payload = await res.json();
-  const items = Array.isArray(payload) ? payload : payload?.events;
-  if (!Array.isArray(items)) throw new Error('Некорректный формат ответа GET /events. Ожидается массив events.');
-  return items.map(normalizeEvent);
+  return parseEventList(await res.json());
 }
 
-export async function sendChat(message, sessionId) {
+export async function sendChat(message, sessionId, history = []) {
   if (DEMO_MODE) return demoSendMessage(message);
-  const res = await request('/chat', { method: 'POST', json: { message, session_id: sessionId } });
-  const json = await res.json();
-  if (typeof json?.reply !== 'string') throw new Error('Некорректный ответ /chat: отсутствует поле reply.');
-  return {
-    reply: json.reply,
-    session_id: typeof json.session_id === 'string' ? json.session_id : sessionId,
-    events: Array.isArray(json.events) ? json.events.map(normalizeEvent) : [],
-  };
+  const res = await request('/chat', { method: 'POST', json: makeChatRequest(message, sessionId, history) });
+  return parseChatResponse(await res.json(), sessionId);
 }
 
 export async function speechToText(blob) {
@@ -57,22 +48,31 @@ export async function speechToText(blob) {
   const mime = blob.type.split(';')[0].trim();
   const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : mime.includes('wav') ? 'wav' : 'webm';
   const form = new FormData();
-  form.append('file', blob, `speech.${ext}`);
+  // Backend: async def stt(audio: UploadFile = File(...))
+  form.append('audio', blob, `speech.${ext}`);
   const res = await request('/stt', { method: 'POST', body: form, timeout: 45000 });
   const data = await res.json();
-  const transcript = data?.text ?? data?.transcript;
-  if (typeof transcript !== 'string') throw new Error('Некорректный ответ /stt: отсутствует text.');
-  return transcript.trim();
+  if (typeof data?.text !== 'string') throw new Error('Некорректный ответ /stt: отсутствует text.');
+  if (data.text.startsWith('[stub]')) {
+    throw new Error('Backend /stt пока возвращает заглушку. Нужен работающий модуль распознавания речи.');
+  }
+  return data.text.trim();
 }
 
 export async function textToSpeech(text) {
-  if (DEMO_MODE) return null; // In demo mode the browser's built-in voice is used.
+  if (DEMO_MODE) return null;
   const res = await request('/tts', { method: 'POST', json: { text }, timeout: 45000 });
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.toLowerCase().startsWith('audio/')) {
-    throw new Error('Некорректный ответ /tts: ожидается аудиофайл, а не JSON.');
+  const audioUrl = parseTtsResponse(await res.json());
+  // Only relative API URLs are accepted; never pass arbitrary remote URLs to fetch.
+  if (!audioUrl.startsWith('/') || audioUrl.startsWith('//') || audioUrl.includes('\\')) {
+    throw new Error('Небезопасный URL аудио от /tts. Ожидается относительный путь.');
   }
-  const blob = await res.blob();
+  const path = audioUrl.startsWith('/api/') ? audioUrl.slice(4) : audioUrl;
+  // /static is proxied by Vite alongside /api; production needs matching routing.
+  const audioRes = await request(path, { timeout: 45000 });
+  const contentType = audioRes.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().startsWith('audio/')) throw new Error('Ссылка /tts не вернула аудиофайл.');
+  const blob = await audioRes.blob();
   if (!blob.size) throw new Error('Сервис /tts вернул пустое аудио.');
   return blob;
 }

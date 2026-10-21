@@ -43,7 +43,7 @@ export function fromCsv(row) {
 
 export function normalizeEvent(raw) {
   const title = raw?.title ?? raw?.text ?? raw?.name ?? '';
-  const rawDate = raw?.date ?? raw?.scheduled_date ?? raw?.start_date ?? '';
+  const rawDate = raw?.datetime ?? raw?.date ?? raw?.scheduled_date ?? raw?.start_date ?? '';
   const date = String(rawDate).slice(0, 10);
   const rawTime = raw?.time ?? raw?.scheduled_time ?? (String(rawDate).includes('T') ? String(rawDate).slice(11, 16) : '');
   const type = EVENT_TYPES[raw?.type] ? raw.type : 'event';

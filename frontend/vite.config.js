@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       proxy: {
+        '/static': { target, changeOrigin: true },
         '/api': {
           target,
           changeOrigin: true,

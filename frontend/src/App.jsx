@@ -83,8 +83,9 @@ export default function App() {
     stopPlayback();
     appendMessage('user', text);
     try {
-      const result = await sendChat(text, sessionId);
+      const result = await sendChat(text, sessionId, messages);
       const response = appendMessage('assistant', result.reply, result.events || []);
+      if (result.is_stub) setError('Backend /chat пока работает как заглушка: реальные задачи не создаются. Дождитесь реализации dialog_service.');
       if (result.session_id && result.session_id !== sessionId) setSessionId(result.session_id);
       // A successful /chat can mutate saved events; refresh the side panel.
       void reloadEvents();
