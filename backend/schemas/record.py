@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+import datetime as dt
 from enum import Enum
 from typing import Optional
 
@@ -22,12 +22,12 @@ class RecordCreate(BaseModel):
     type: RecordType
     title: str = Field(..., min_length=1, max_length=500)
     raw_text: Optional[str] = None
-    datetime: Optional[datetime] = None
+    datetime: Optional[dt.datetime] = None
 
 
 class RecordUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
-    datetime: Optional[datetime] = None
+    datetime: Optional[dt.datetime] = None
     status: Optional[RecordStatus] = None
 
 
@@ -37,8 +37,8 @@ class RecordOut(BaseModel):
     type: RecordType
     title: str
     raw_text: Optional[str] = None
-    datetime: Optional[datetime] = None
-    created_at: datetime
+    datetime: Optional[dt.datetime] = None
+    created_at: dt.datetime
     status: RecordStatus
 
     model_config = {"from_attributes": True}

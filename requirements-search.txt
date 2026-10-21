@@ -1,0 +1,3 @@
+# Необязательные зависимости семантического поиска (SEARCH_EMBEDDINGS=1).
+# Основной requirements.txt их не содержит, потому что torch весит сотни мегабайт.
+sentence-transformers==3.2.1

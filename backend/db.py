@@ -17,8 +17,10 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 def init_db() -> None:
-    # from backend.models import record, message  # noqa: F401
-    Base.metadata.create_all(bind=engine)
+    # Таблицы records, record_embeddings, индексы и FTS5 создает слой хранения.
+    from backend.storage import init_storage
+
+    init_storage(engine)
 
 
 def get_db():
