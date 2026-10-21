@@ -156,7 +156,25 @@ class QueryPlan:
 
 
 def _vocabulary(conn: Connection) -> list[str]:
-    return [r[0] for r in conn.execute(text(f"SELECT term FROM {VOCAB_TABLE}"))]
+    # Числа и одиночные буквы не участвуют в поиске по подстроке и опечаткам.
+    rows = conn.execute(text(f"SELECT term FROM {VOCAB_TABLE} WHERE length(term) >= 4"))
+    return [r[0] for r in rows if r[0].isalpha()]
+
+
+def _is_typo(word: str, term: str) -> bool:
+    """Похожи ли слова с точностью до опечатки.
+
+    Сначала идут дешевые проверки длины и верхней оценки похожести, поэтому
+    полный расчет SequenceMatcher выполняется лишь для немногих слов словаря.
+    """
+    if abs(len(word) - len(term)) > 2:
+        return False
+    matcher = difflib.SequenceMatcher(None, word, term)
+    return (
+        matcher.real_quick_ratio() >= FUZZY_RATIO
+        and matcher.quick_ratio() >= FUZZY_RATIO
+        and matcher.ratio() >= FUZZY_RATIO
+    )
 
 
 def build_query(conn: Connection, query: str) -> QueryPlan:
@@ -175,10 +193,12 @@ def build_query(conn: Connection, query: str) -> QueryPlan:
         if vocab is None:
             vocab = _vocabulary(conn)
         folded_word = fold(word)
+        long_variants = [v for v in variants if len(v) >= 4]
+        check_typos = len(folded_word) >= 4
         for term in vocab:
-            if any(len(v) >= 4 and v in term and not term.startswith(v) for v in variants):
+            if any(v in term and not term.startswith(v) for v in long_variants):
                 variants.add(term)
-            elif len(folded_word) >= 4 and difflib.SequenceMatcher(None, folded_word, term).ratio() >= FUZZY_RATIO:
+            elif check_typos and _is_typo(folded_word, term):
                 variants.add(term)
         groups.append(tuple(sorted(v for v in variants if v)))
     return QueryPlan(words=tuple(query_words), groups=tuple(groups))
