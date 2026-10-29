@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
@@ -18,4 +18,5 @@ data/tts/*
 .DS_Store
 .idea/
 .vscode/
+.vercel
 *.log
