@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/chat",
+      "destination": "http://2.27.21.97:8000/chat"
+    },
+    {
+      "source": "/events",
+      "destination": "http://2.27.21.97:8000/events"
+    },
+    {
+      "source": "/events/:match*",
+      "destination": "http://2.27.21.97:8000/events/:match*"
+    },
+    {
+      "source": "/stt",
+      "destination": "http://2.27.21.97:8000/stt"
+    },
+    {
+      "source": "/tts",
+      "destination": "http://2.27.21.97:8000/tts"
+    },
+    {
+      "source": "/tts/:match*",
+      "destination": "http://2.27.21.97:8000/tts/:match*"
+    },
+    {
+      "source": "/static/tts/:match*",
+      "destination": "http://2.27.21.97:8000/static/tts/:match*"
+    },
+    {
+      "source": "/health",
+      "destination": "http://2.27.21.97:8000/health"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/frontend/$1"
+    }
+  ]
+}
