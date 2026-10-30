@@ -145,6 +145,11 @@ class NLUModule:
             p_start = parsed_period.period_start
             p_end = parsed_period.period_end
 
+            if not p_start and not p_end and text:
+                parsed_text_period = self.date_parser.parse_period(text, base_dt=current_dt)
+                if parsed_text_period:
+                    _, p_start, p_end = parsed_text_period
+
             if validated_list.from_datetime:
                 p_start = datetime.fromisoformat(validated_list.from_datetime)
             if validated_list.to_datetime:

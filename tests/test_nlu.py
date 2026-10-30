@@ -449,3 +449,100 @@ def test_conflict_warning_in_history_does_not_hijack_subsequent_meeting(nlu, fix
     assert ":00" not in res.title
 
 
+def test_list_events_bounds_populated(nlu, fixed_now):
+    res_today = nlu.parse("Что у меня сегодня?", now=fixed_now)
+    assert res_today.period_start == datetime(2026, 10, 20, 0, 0)
+    assert res_today.period_end.hour == 23
+
+    res_tomorrow = nlu.parse("Какие планы на завтра?", now=fixed_now)
+    assert res_tomorrow.period_start == datetime(2026, 10, 21, 0, 0)
+    assert res_tomorrow.period_end.hour == 23
+
+    res_week = nlu.parse("Что запланировано на эту неделю?", now=fixed_now)
+    assert res_week.period_start is not None
+    assert res_week.period_end is not None
+
+
+def test_meeting_preposition_preservation(nlu, fixed_now):
+    res1 = nlu.parse("Встреча по проекту завтра в 10:00", now=fixed_now)
+    assert res1.intent == "create_meeting"
+    assert res1.title == "Встреча по проекту"
+
+    res2 = nlu.parse("Встреча для инвесторов в пятницу в 12:00", now=fixed_now)
+    assert res2.intent == "create_meeting"
+    assert res2.title == "Встреча для инвесторов"
+
+    res3 = nlu.parse("Созвон с техлидом в 16:00", now=fixed_now)
+    assert res3.intent == "create_meeting"
+    assert res3.title == "Созвон с техлидом"
+
+
+def test_meeting_relative_delta_stripped(nlu, fixed_now):
+    res = nlu.parse("Встреча через полчаса с клиентом", now=fixed_now)
+    assert res.intent == "create_meeting"
+    assert res.title == "Встреча с клиентом"
+    assert res.datetime == datetime(2026, 10, 20, 13, 30)
+
+
+def test_search_inquiry_variations(nlu, fixed_now):
+    cases = [
+        "Когда была встреча с Иваном?",
+        "Когда созвон с техлидом?",
+        "Когда у нас встреча с дизайнером?",
+        "Покажи контракт",
+        "Покажи задачу про договор",
+        "Я когда-то создавал задачу про отчет"
+    ]
+    for c in cases:
+        res = nlu.parse(c, now=fixed_now)
+        assert res.intent == "search_events", f"Failed for query: {c}"
+
+
+def test_multi_turn_clarification_with_intermediate_search(client):
+    sess = "test-multi-turn-search-interrupt"
+    # Turn 1: create meeting without time triggers clarification
+    r1 = client.post("/chat", json={"session_id": sess, "text": "Поставь встречу с Иваном завтра"})
+    assert r1.status_code == 200
+    assert r1.json()["needs_clarification"] is True
+
+    # Turn 2: intermediate search does not break the clarification flow
+    r2 = client.post("/chat", json={"session_id": sess, "text": "Найди презентацию"})
+    assert r2.status_code == 200
+    assert r2.json()["action"]["type"] == "search_events"
+
+    # Turn 3: user answers with time, resolving the meeting with Ivan
+    r3 = client.post("/chat", json={"session_id": sess, "text": "в 15:00"})
+    assert r3.status_code == 200
+    data3 = r3.json()
+    assert data3["action"]["type"] == "create_meeting"
+    assert "иван" in data3["action"]["record"]["title"].lower()
+    assert "15:00" in data3["reply_text"]
+
+
+def test_bare_time_without_context_prompts_clarification(client):
+    r = client.post("/chat", json={"session_id": "fresh-session-bare-time", "text": "в 15:00"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["needs_clarification"] is True
+    assert "какую задачу" in data["reply_text"].lower() or "уточните" in data["reply_text"].lower()
+
+
+def test_reschedule_named_meeting(client):
+    sess = "test-resched-named"
+    client.post("/chat", json={"session_id": sess, "text": "Добавь встречу с дизайнером в четверг в 11:00"})
+    r_upd = client.post("/chat", json={"session_id": sess, "text": "Перенеси встречу с дизайнером на пятницу"})
+    assert r_upd.status_code == 200
+    data = r_upd.json()
+    assert data["action"]["type"] == "update_event"
+    assert "дизайнер" in data["reply_text"].lower()
+    assert "11:00" in data["reply_text"]
+
+
+def test_explicit_month_date_parsing(nlu, fixed_now):
+    res = nlu.parse("Встреча 15 ноября в 14:00 с партнерами", now=fixed_now)
+    assert res.intent == "create_meeting"
+    assert res.datetime == datetime(2026, 11, 15, 14, 0)
+    assert res.title == "Встреча с партнерами"
+
+
+

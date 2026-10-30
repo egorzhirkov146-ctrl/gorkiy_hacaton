@@ -111,7 +111,9 @@ class RussianDateParser:
         match = re.search(r"\bв\s+(\d{1,2})\s*(?:ч|час|часа|часов)?\b", clean)
         if match:
             h = int(match.group(1))
-            if 0 <= h < 24:
+            if 1 <= h <= 6:
+                return time(h + 12, 0), True
+            elif 0 <= h < 24:
                 return time(h, 0), True
 
         # 5. Словесные указания времени
@@ -171,50 +173,47 @@ class RussianDateParser:
     def parse_period(self, text: str, base_dt: datetime) -> Optional[tuple[str, datetime, datetime]]:
         clean = text.lower().strip()
 
-        if "послезавтра" in clean:
+        if clean in ("after_tomorrow", "day_after_tomorrow", "послезавтра") or "послезавтра" in clean:
             t = base_dt + timedelta(days=2)
             start = t.replace(hour=0, minute=0, second=0, microsecond=0)
             end = t.replace(hour=23, minute=59, second=59, microsecond=999999)
             return "custom", start, end
 
-        if re.search(r"\bсегодня\b", clean):
+        if clean in ("today", "сегодня") or re.search(r"\bсегодня\b", clean):
             start = base_dt.replace(hour=0, minute=0, second=0, microsecond=0)
             end = base_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
             return "today", start, end
 
-        if re.search(r"\bзавтра\b", clean):
+        if clean in ("tomorrow", "завтра") or re.search(r"\bзавтра\b", clean):
             t = base_dt + timedelta(days=1)
             start = t.replace(hour=0, minute=0, second=0, microsecond=0)
             end = t.replace(hour=23, minute=59, second=59, microsecond=999999)
             return "tomorrow", start, end
 
-        if "до конца недели" in clean:
-            days_ahead = 6 - base_dt.weekday()
-            sunday = base_dt + timedelta(days=days_ahead)
-            end = sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
-            return "this_week", base_dt, end
-
-        if "на этой неделе" in clean or "на эту неделю" in clean:
+        if clean == "this_week" or "до конца недели" in clean or "на этой неделе" in clean or "на эту неделю" in clean:
             monday = base_dt - timedelta(days=base_dt.weekday())
             sunday = monday + timedelta(days=6)
             start = monday.replace(hour=0, minute=0, second=0, microsecond=0)
             end = sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
             return "this_week", start, end
 
-        if "на следующей неделе" in clean or "на следующую неделю" in clean:
+        if clean == "next_week" or "на следующей неделе" in clean or "на следующую неделю" in clean:
             next_monday = base_dt + timedelta(days=7 - base_dt.weekday())
             next_sunday = next_monday + timedelta(days=6)
             start = next_monday.replace(hour=0, minute=0, second=0, microsecond=0)
             end = next_sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
             return "next_week", start, end
 
-        if "на выходных" in clean or "в выходные" in clean or "на эти выходные" in clean:
+        if clean == "weekend" or "на выходных" in clean or "в выходные" in clean or "на эти выходные" in clean:
             saturday_offset = (5 - base_dt.weekday()) % 7
             saturday = base_dt + timedelta(days=saturday_offset)
             sunday = saturday + timedelta(days=1)
             start = saturday.replace(hour=0, minute=0, second=0, microsecond=0)
             end = sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
             return "this_week", start, end
+
+        if clean in ("all", "all_time", "все время", "всё время"):
+            return "all", None, None
 
         return None
 
@@ -274,11 +273,11 @@ class RussianDateParser:
 
         target_date = None
 
-        if "послезавтра" in clean:
+        if clean in ("after_tomorrow", "day_after_tomorrow", "послезавтра") or "послезавтра" in clean:
             target_date = (now + timedelta(days=2)).date()
-        elif re.search(r"\bзавтра\b", clean):
+        elif clean in ("tomorrow", "завтра") or re.search(r"\bзавтра\b", clean):
             target_date = (now + timedelta(days=1)).date()
-        elif re.search(r"\bсегодня\b", clean):
+        elif clean in ("today", "сегодня") or re.search(r"\bсегодня\b", clean):
             target_date = now.date()
         elif re.search(r"\bвчера\b", clean):
             target_date = (now - timedelta(days=1)).date()
@@ -328,6 +327,39 @@ class RussianDateParser:
                 period_end=p_end
             )
 
+        month_match = re.search(
+            r"\b(\d{1,2}\s+(?:январ\w*|феврал\w*|март\w*|апрел\w*|ма[яеи]|июн\w*|июл\w*|август\w*|сентябр\w*|октябр\w*|ноябр\w*|декабр\w*)(?:\s+(?:в\s+)?\d{1,2}[:.]\d{2})?)\b|\b(\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?(?:\s+(?:в\s+)?\d{1,2}[:.]\d{2})?)\b",
+            clean
+        )
+
+        fallback_dt = None
+        if month_match:
+            date_snippet = (month_match.group(1) or month_match.group(2) or clean).strip()
+            fallback_dt = dateparser.parse(
+                date_snippet,
+                languages=["ru"],
+                settings={
+                    "RELATIVE_BASE": now,
+                    "PREFER_DATES_FROM": "future",
+                    "RETURN_AS_TIMEZONE_AWARE": False,
+                    "DATE_ORDER": "DMY",
+                }
+            )
+
+        if fallback_dt:
+            final_time = parsed_time if has_time else fallback_dt.time()
+            res_dt = datetime.combine(fallback_dt.date(), final_time)
+            has_explicit = has_time or (final_time != time(0, 0))
+            return ParsedDateTime(
+                dt=res_dt,
+                iso=res_dt.isoformat(),
+                has_explicit_time=has_explicit,
+                has_explicit_date=True,
+                period=period_name,
+                period_start=p_start,
+                period_end=p_end
+            )
+
         if has_time and parsed_time is not None:
             today_dt = datetime.combine(now.date(), parsed_time)
             if today_dt < now:
@@ -347,7 +379,8 @@ class RussianDateParser:
             settings={
                 "RELATIVE_BASE": now,
                 "PREFER_DATES_FROM": "future",
-                "RETURN_AS_TIMEZONE_AWARE": False
+                "RETURN_AS_TIMEZONE_AWARE": False,
+                "DATE_ORDER": "DMY",
             }
         )
 
@@ -362,7 +395,6 @@ class RussianDateParser:
                 period_start=p_start,
                 period_end=p_end
             )
-
 
         return ParsedDateTime(
             period=period_name,

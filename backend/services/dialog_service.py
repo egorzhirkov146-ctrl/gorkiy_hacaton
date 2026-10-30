@@ -134,14 +134,16 @@ class DialogService:
 
         # 5. Получение списка событий на период
         if nlu_res.intent == "list_events":
+            clean_text = req.text.lower()
+            default_period_ru = "послезавтра" if "послезавтра" in clean_text else "запрошенный период"
             period_ru = {
                 "today": "сегодня",
                 "tomorrow": "завтра",
                 "this_week": "эту неделю",
                 "next_week": "следующую неделю",
                 "all": "все время",
-                "custom": "выбранный период",
-            }.get(nlu_res.period or "today", "запрошенный период")
+                "custom": default_period_ru,
+            }.get(nlu_res.period or "today", default_period_ru)
 
             records_out = None
             if task_service:
@@ -200,7 +202,17 @@ class DialogService:
                 if not records_out:
                     reply = f"По запросу '{nlu_res.search_query}' ничего не найдено."
                 else:
-                    items_str = ", ".join(f"'{r.title}'" for r in records_out[:3])
+                    def _format_rec(r):
+                        if r.datetime:
+                            time_str = r.datetime.strftime("%H:%M")
+                            if time_str != "00:00" or r.type == RecordType.meeting:
+                                dt_s = r.datetime.strftime("%d.%m в %H:%M")
+                            else:
+                                dt_s = r.datetime.strftime("%d.%m")
+                            return f"'{r.title}' ({dt_s})"
+                        return f"'{r.title}'"
+
+                    items_str = ", ".join(_format_rec(r) for r in records_out[:3])
                     more_str = f" и еще {len(records_out) - 3}" if len(records_out) > 3 else ""
                     reply = f"Найдено ({len(records_out)}): {items_str}{more_str}."
             else:
