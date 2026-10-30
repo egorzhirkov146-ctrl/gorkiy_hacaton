@@ -21,7 +21,7 @@ from pathlib import Path
 
 
 def init_db() -> None:
-    from backend.models import Record, Message  # noqa: F401
+    from backend.models import Record, Message, RecordEmbedding  # noqa: F401
     db_file = Path(settings.db_path)
     db_file.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
@@ -35,6 +35,13 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE records ADD COLUMN recurrence VARCHAR(20)"))
             if "recurrence_until" not in existing_cols:
                 conn.execute(text("ALTER TABLE records ADD COLUMN recurrence_until DATETIME"))
+    except Exception:
+        pass
+
+    # Инициализация FTS5 и вспомогательных структур хранилища
+    try:
+        from backend.storage.sqlite import init_storage
+        init_storage(engine)
     except Exception:
         pass
 

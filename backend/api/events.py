@@ -55,11 +55,12 @@ def create_event(
 @router.get("/events/{event_id}", response_model=RecordOut)
 def get_event(
     event_id: int,
+    user_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ) -> RecordOut:
     service = TaskService(db)
     rec = service.get(event_id)
-    if not rec:
+    if not rec or (user_id is not None and rec.user_id != user_id):
         raise HTTPException(status_code=404, detail="Event not found")
     return RecordOut.model_validate(rec)
 
@@ -68,23 +69,28 @@ def get_event(
 def update_event(
     event_id: int,
     data: RecordUpdate,
+    user_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ) -> RecordOut:
     service = TaskService(db)
-    rec = service.update(event_id, data)
-    if not rec:
+    rec = service.get(event_id)
+    if not rec or (user_id is not None and rec.user_id != user_id):
         raise HTTPException(status_code=404, detail="Event not found")
-    return RecordOut.model_validate(rec)
+    updated = service.update(event_id, data)
+    return RecordOut.model_validate(updated)
 
 
 @router.delete("/events/{event_id}")
 def delete_event(
     event_id: int,
+    user_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
 ) -> dict:
     service = TaskService(db)
-    if not service.delete(event_id):
+    rec = service.get(event_id)
+    if not rec or (user_id is not None and rec.user_id != user_id):
         raise HTTPException(status_code=404, detail="Event not found")
+    service.delete(event_id)
     return {"status": "ok", "deleted_id": event_id}
 
 

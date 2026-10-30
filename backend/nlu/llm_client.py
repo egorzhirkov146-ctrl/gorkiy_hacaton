@@ -133,7 +133,7 @@ class LLMClient:
                             elif action_type == "list":
                                 return "list_events", parsed, content
                             elif action_type == "search":
-                                return "search_records", parsed, content
+                                return "search_events", parsed, content
                         if "reply" in parsed and parsed["reply"]:
                             return "conversation", {"reply": parsed["reply"]}, parsed["reply"]
                 except Exception:

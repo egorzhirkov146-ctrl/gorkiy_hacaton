@@ -146,3 +146,10 @@ def test_e2e_user_isolation_and_seed(client):
     assert client.get("/events", params={"user_id": 99999}).json()["count"] == 0
     assert client.get("/events", params={"user_id": 88888}).json()["count"] == 1
 
+    # 7. Защита от IDOR: пользователь 99999 не может прочитать или удалить задачу 88888
+    event_88888_id = res_88888_after.json()["items"][0]["id"]
+    get_cross = client.get(f"/events/{event_88888_id}", params={"user_id": 99999})
+    assert get_cross.status_code == 404
+    del_cross = client.delete(f"/events/{event_88888_id}", params={"user_id": 99999})
+    assert del_cross.status_code == 404
+
