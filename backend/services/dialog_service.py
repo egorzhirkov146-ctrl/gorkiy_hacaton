@@ -135,7 +135,21 @@ class DialogService:
         # 5. Получение списка событий на период
         if nlu_res.intent == "list_events":
             clean_text = req.text.lower()
-            default_period_ru = "послезавтра" if "послезавтра" in clean_text else "запрошенный период"
+            weekday_ru_map = {
+                "понедельник": "понедельник",
+                "вторник": "вторник",
+                "сред": "среду",
+                "четверг": "четверг",
+                "пятниц": "пятницу",
+                "суббот": "субботу",
+                "воскресень": "воскресенье",
+            }
+            target_w = None
+            for k, v in weekday_ru_map.items():
+                if k in clean_text:
+                    target_w = v
+                    break
+            default_period_ru = target_w or ("послезавтра" if "послезавтра" in clean_text else "запрошенный период")
             period_ru = {
                 "today": "сегодня",
                 "tomorrow": "завтра",

@@ -1,4 +1,5 @@
 from datetime import datetime
+import uuid
 import pytest
 from fastapi.testclient import TestClient
 
@@ -499,7 +500,7 @@ def test_search_inquiry_variations(nlu, fixed_now):
 
 
 def test_multi_turn_clarification_with_intermediate_search(client):
-    sess = "test-multi-turn-search-interrupt"
+    sess = f"test-multi-turn-search-interrupt-{uuid.uuid4().hex}"
     # Turn 1: create meeting without time triggers clarification
     r1 = client.post("/chat", json={"session_id": sess, "text": "Поставь встречу с Иваном завтра"})
     assert r1.status_code == 200
@@ -520,15 +521,44 @@ def test_multi_turn_clarification_with_intermediate_search(client):
 
 
 def test_bare_time_without_context_prompts_clarification(client):
-    r = client.post("/chat", json={"session_id": "fresh-session-bare-time", "text": "в 15:00"})
+    sess = f"fresh-session-bare-time-{uuid.uuid4().hex}"
+    r = client.post("/chat", json={"session_id": sess, "text": "в 15:00"})
     assert r.status_code == 200
     data = r.json()
     assert data["needs_clarification"] is True
     assert "какую задачу" in data["reply_text"].lower() or "уточните" in data["reply_text"].lower()
 
 
+def test_bare_time_followup_meeting(client):
+    sess = f"test-bare-time-followup-m-{uuid.uuid4().hex}"
+    r1 = client.post("/chat", json={"session_id": sess, "text": "в 15:00"})
+    assert r1.status_code == 200
+    assert r1.json()["needs_clarification"] is True
+
+    r2 = client.post("/chat", json={"session_id": sess, "text": "встреча с дизайнером"})
+    assert r2.status_code == 200
+    d2 = r2.json()
+    assert d2["action"]["type"] == "create_meeting"
+    assert "дизайнер" in d2["action"]["record"]["title"].lower()
+    assert "15:00" in d2["action"]["record"]["datetime"]
+
+
+def test_bare_time_followup_task(client):
+    sess = f"test-bare-time-followup-t-{uuid.uuid4().hex}"
+    r1 = client.post("/chat", json={"session_id": sess, "text": "завтра в 10 утра"})
+    assert r1.status_code == 200
+    assert r1.json()["needs_clarification"] is True
+
+    r2 = client.post("/chat", json={"session_id": sess, "text": "позвонить маме"})
+    assert r2.status_code == 200
+    d2 = r2.json()
+    assert d2["action"]["type"] == "create_task"
+    assert "позвонить маме" in d2["action"]["record"]["title"].lower()
+    assert "10:00" in d2["action"]["record"]["datetime"]
+
+
 def test_reschedule_named_meeting(client):
-    sess = "test-resched-named"
+    sess = f"test-resched-named-{uuid.uuid4().hex}"
     client.post("/chat", json={"session_id": sess, "text": "Добавь встречу с дизайнером в четверг в 11:00"})
     r_upd = client.post("/chat", json={"session_id": sess, "text": "Перенеси встречу с дизайнером на пятницу"})
     assert r_upd.status_code == 200
@@ -543,6 +573,27 @@ def test_explicit_month_date_parsing(nlu, fixed_now):
     assert res.intent == "create_meeting"
     assert res.datetime == datetime(2026, 11, 15, 14, 0)
     assert res.title == "Встреча с партнерами"
+
+
+def test_list_events_weekday_filtering(client, fixed_now):
+    sess = f"test-weekday-filter-{uuid.uuid4().hex}"
+    # Seed specific events for Friday
+    r = client.post("/chat", json={"session_id": sess, "text": "Что у меня в пятницу?"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["action"]["type"] == "list_events"
+    assert "пятниц" in data["reply_text"].lower()
+
+
+def test_conversational_words_do_not_create_tasks(client):
+    for word in ["хорошо", "ок", "отмена", "не надо", "как дела?", "кто ты?"]:
+        sess = f"test-conv-{uuid.uuid4().hex}"
+        r = client.post("/chat", json={"session_id": sess, "text": word})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["action"]["type"] == "conversation"
+        assert data["action"]["record"] is None
+
 
 
 

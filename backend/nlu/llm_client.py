@@ -197,7 +197,7 @@ class LLMClient:
         if not clean:
             return "unknown", {}, None
 
-        # 1. Вежливый диалог, приветствия, помощь и благодарности
+        # 1. Вежливый диалог, приветствия, помощь, подтверждения и отмена
         if re.search(r"^(?:привет|здравствуй|здравствуйте|добрый день|доброе утро|добрый вечер|салют|хай)\b", clean):
             return "conversation", {
                 "reply": "Здравствуйте! Я ваш голосовой ассистент. Могу записать задачу, назначить встречу, найти старые записи или показать расписание.",
@@ -222,22 +222,52 @@ class LLMClient:
                 "sub_type": "help"
             }, None
 
-        # 2. Уточняющий диалог (ответ пользователя на вопрос ассистента о времени)
+        if re.search(r"^(?:хорошо|ок|окей|ладно|понятно|ясно|договорились|принято|понял|всё понятно|все понятно)\b", clean):
+            return "conversation", {
+                "reply": "Договорились! Обращайтесь, если потребуется что-то запланировать.",
+                "sub_type": "ack"
+            }, None
+
+        if re.search(r"^(?:отмена|отбой|не надо|стоп|передумал|забудь|отставить)\b", clean):
+            return "conversation", {
+                "reply": "Хорошо, действие отменено.",
+                "sub_type": "cancel"
+            }, None
+
+        if re.search(r"\b(?:как\s+дела|как\s+жизнь|как\s+ты|как\s+поживаешь)\b", clean):
+            return "conversation", {
+                "reply": "Всё отлично, готов помочь с вашими задачами и расписанием!",
+                "sub_type": "smalltalk"
+            }, None
+
+        if re.search(r"\b(?:кто\s+ты|ты\s+кто|как\s+тебя\s+зовут|что\s+ты\s+такое)\b", clean):
+            return "conversation", {
+                "reply": "Я ваш голосовой ассистент для управления личными задачами, встречами и расписанием.",
+                "sub_type": "identity"
+            }, None
+
+        # 2. Уточняющий диалог
         if len(messages) >= 2:
             unresolved_time_question = False
+            unresolved_title_question = False
             last_meeting_user_msg = ""
+            last_time_user_msg = ""
             for m in reversed(messages[:-1]):
                 role = m.get("role")
                 content = m.get("content", "").lower()
                 if role == "assistant":
-                    if "запланировал:" in content or ("событие" in content and "перенесено" in content):
+                    if "запланировал:" in content or ("событие" in content and "перенесено" in content) or "записал" in content:
                         break
-                    if "?" in content and ("время" in content or "во сколько" in content):
+                    if "?" in content and ("какую задачу" in content or "какую встречу" in content or "какое событие" in content or "что поставить" in content):
+                        unresolved_title_question = True
+                    elif "?" in content and ("время" in content or "во сколько" in content or "на какое время" in content):
                         unresolved_time_question = True
-                elif role == "user" and unresolved_time_question:
-                    if any(w in content for w in ("встреч", "созвон", "митинг")):
-                        last_meeting_user_msg = m.get("content", "")
-                        break
+                elif role == "user":
+                    if unresolved_time_question and not last_meeting_user_msg:
+                        if any(w in content for w in ("встреч", "созвон", "митинг")):
+                            last_meeting_user_msg = m.get("content", "")
+                    elif unresolved_title_question and not last_time_user_msg:
+                        last_time_user_msg = m.get("content", "")
 
             has_new_intent = bool(
                 re.search(
@@ -248,6 +278,47 @@ class LLMClient:
             has_own_meeting_subject = bool(
                 re.search(r"(?:встреч\w*|созвон\w*|митинг\w*)\s+(?:с\s+|со\s+|по\s+|для\s+)?([^,.?!]+)", clean)
             )
+
+            if unresolved_title_question and last_time_user_msg:
+                from datetime import timedelta, time as dt_time
+                prev_t, has_prev_t = self.date_parser.parse_time_component(last_time_user_msg)
+                prev_parsed = self.date_parser.parse(last_time_user_msg, base_dt=now)
+                time_val = prev_t or (prev_parsed.dt.time() if prev_parsed.dt else dt_time(12, 0))
+                
+                curr_parsed = self.date_parser.parse(clean, base_dt=now)
+                if curr_parsed.has_explicit_date and curr_parsed.dt:
+                    date_val = curr_parsed.dt.date()
+                elif prev_parsed.has_explicit_date and prev_parsed.dt:
+                    date_val = prev_parsed.dt.date()
+                else:
+                    date_val = (now + timedelta(days=1)).date() if now.time() > time_val else now.date()
+
+                combined_dt = datetime.combine(date_val, time_val).isoformat()
+
+                if any(w in clean for w in ("встреч", "созвон", "митинг")):
+                    m_kind = "Созвон" if "созвон" in clean else ("Митинг" if "митинг" in clean else "Встреча")
+                    match_m = re.search(r"(?:встреч\w*|созвон\w*|митинг\w*)\s+([^,.?!]+)", clean, re.IGNORECASE)
+                    if match_m:
+                        sub = match_m.group(1).strip()
+                        sub = re.sub(r"^(?:с|со|по|для|о|об)\s+", "", sub).strip()
+                        m_title = f"{m_kind} с {sub}" if sub else m_kind
+                    else:
+                        m_title = m_kind
+                    return "create_meeting", {
+                        "title": m_title,
+                        "datetime_str": combined_dt,
+                        "raw_text": f"{m_title} {combined_dt}"
+                    }, None
+                else:
+                    task_clean = re.sub(r"^(?:поставь\s+задачу|добавь\s+задачу|создай\s+задачу|задача|напомни)\s*", "", clean).strip()
+                    t_title = task_clean or clean
+                    rec_k = "reminder" if "напомни" in clean else "task"
+                    return "create_task", {
+                        "title": t_title,
+                        "datetime_str": combined_dt,
+                        "record_type": rec_k,
+                        "raw_text": f"{t_title} {combined_dt}"
+                    }, None
 
             if unresolved_time_question and not has_new_intent and not has_own_meeting_subject:
                 parsed_t, has_t = self.date_parser.parse_time_component(clean)
@@ -370,6 +441,8 @@ class LLMClient:
                 period = "this_week"
             elif "на следующей неделе" in clean or "на следующую неделю" in clean:
                 period = "next_week"
+            elif any(w in clean for w in ("понедельник", "вторник", "сред", "четверг", "пятниц", "суббот", "воскресень")):
+                period = "custom"
 
             rec_type = "all"
             if "встреч" in clean:

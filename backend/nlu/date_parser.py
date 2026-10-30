@@ -212,6 +212,16 @@ class RussianDateParser:
             end = sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
             return "this_week", start, end
 
+        for w_name, w_idx in RU_WEEKDAYS.items():
+            if re.search(rf"\b(?:в|во|на)?\s*{w_name}\b", clean):
+                days_ahead = (w_idx - base_dt.weekday()) % 7
+                if days_ahead == 0 and "сегодня" not in clean:
+                    days_ahead = 7
+                target_d = base_dt + timedelta(days=days_ahead)
+                start = target_d.replace(hour=0, minute=0, second=0, microsecond=0)
+                end = target_d.replace(hour=23, minute=59, second=59, microsecond=999999)
+                return "custom", start, end
+
         if clean in ("all", "all_time", "все время", "всё время"):
             return "all", None, None
 
