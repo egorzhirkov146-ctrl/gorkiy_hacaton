@@ -1,11 +1,14 @@
 # Голосовой ассистент для управления задачами и встречами
 
-[![Tests Status](https://img.shields.io/badge/tests-92%20passed-brightgreen.svg)]()
+[![Tests Status](https://img.shields.io/badge/tests-105%20passed-brightgreen.svg)]()
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)]()
 [![Multi-LLM Compatible](https://img.shields.io/badge/LLM-OpenAI%20%7C%20GigaChat%20%7C%20Offline-orange.svg)]()
 
 Прототип русскоязычного голосового ассистента, разработанный в рамках хакатона. Позволяет пользователю управлять личными задачами, напоминаниями и встречами с помощью естественной речи и текста.
+
+- 🌐 **Работающий прототип (Live Demo)**: [https://gorkiy-voice-assistant.vercel.app](https://gorkiy-voice-assistant.vercel.app) (зеркало: [https://gorkiyhacaton.vercel.app](https://gorkiyhacaton.vercel.app))
+- 💻 **Репозиторий проекта**: [https://github.com/egorzhirkov146-ctrl/gorkiy_hacaton](https://github.com/egorzhirkov146-ctrl/gorkiy_hacaton)
 
 ---
 
@@ -190,7 +193,7 @@ docker-compose up --build -d
 
 ## 🧪 Запуск тестов и демо-сценариев
 
-### 1. Запуск полного набора автотестов (92 теста)
+### 1. Запуск полного набора автотестов (105 тестов)
 
 ```bash
 pytest
