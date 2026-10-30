@@ -435,3 +435,17 @@ def test_chat_api_conversational_and_empty(client):
     assert data_greet["action"]["type"] == "conversation"
     assert "помочь" in data_greet["reply_text"].lower() or "привет" in data_greet["reply_text"].lower() or "здравствуйте" in data_greet["reply_text"].lower()
 
+
+def test_conflict_warning_in_history_does_not_hijack_subsequent_meeting(nlu, fixed_now):
+    history = [
+        MessageIn(role="user", content="Добавь встречу с командой завтра в 15:00"),
+        MessageIn(role="assistant", content="Запланировал: Встреча с командой на 21.10 в 15:00. (Внимание: время пересекается с событием 'Созвон' в 15:00.)")
+    ]
+    res = nlu.parse("В четверг в 11 у меня встреча с дизайнером", history=history, now=fixed_now)
+    assert res.intent == "create_meeting"
+    assert "дизайнер" in res.title.lower()
+    assert res.datetime.hour == 11
+    assert res.datetime.day == 22
+    assert ":00" not in res.title
+
+

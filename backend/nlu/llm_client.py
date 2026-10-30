@@ -230,10 +230,23 @@ class LLMClient:
                     last_assistant = m.get("content", "").lower()
                     break
 
-            if "время" in last_assistant or "во сколько" in last_assistant:
+            is_time_clarification_question = bool(
+                "?" in last_assistant and ("время" in last_assistant or "во сколько" in last_assistant)
+            )
+
+            has_new_intent = bool(
+                re.search(
+                    r"^(?:напомни|поставь задачу|создай задачу|добавь задачу|нужно|надо|купи|отправь|позвони|сделай|найди|поищи|что у меня|какие планы|какие задачи|список)\b",
+                    clean,
+                )
+            )
+            has_own_meeting_subject = bool(
+                re.search(r"встреч[уаеы]?\s+(?:с\s+|со\s+|по\s+|для\s+)?([^,.?!]+)", clean)
+            )
+
+            if is_time_clarification_question and not has_new_intent and not has_own_meeting_subject:
                 parsed_t, has_t = self.date_parser.parse_time_component(clean)
                 parsed_self = self.date_parser.parse(clean, base_dt=now)
-
 
                 # Должно быть указано именно время! Если пользователь повторил запрос без времени, не считаем это ответом на время.
                 if has_t or parsed_self.has_explicit_time:
@@ -244,14 +257,25 @@ class LLMClient:
                         if m.get("role") == "user":
                             u_prev = m.get("content", "")
                             if "встреч" in u_prev.lower():
-                                match_m = re.search(r"встреч[уаеы]?\s+(?:с\s+)?([^,.?!]+)", u_prev, re.IGNORECASE)
+                                match_m = re.search(r"встреч[уаеы]?\s+(?:с\s+|со\s+|по\s+|для\s+)?([^,.?!]+)", u_prev, re.IGNORECASE)
                                 if match_m:
                                     raw_sub = match_m.group(1).strip()
                                     cleaned_sub = re.sub(
-                                        r"\b(завтра|сегодня|послезавтра|вчера|до конца недели|на следующей неделе|в\s+\w+)\b",
+                                        r"\b(завтра|сегодня|послезавтра|вчера|до конца недели|на следующей неделе)\b|"
+                                        r"\bв\s+\d{1,2}(?::\d{2})?\b|\b\d{1,2}:\d{2}\b|"
+                                        r"\b(?:в|во|до|к|на)?\s*(?:понедельник\w*|вторник\w*|сред\w+|четверг\w*|пятниц\w+|суббот\w+|воскресень\w+)\b|"
+                                        r"\b\d{1,2}\s*(?:ч|час|часа|часов)?\s*(?:утра|ночи|дня|вечера)?\b|"
+                                        r"\b(?:утра|ночи|дня|вечера)\b",
                                         "", raw_sub, flags=re.IGNORECASE
                                     ).strip()
-                                    meeting_title = f"Встреча с {cleaned_sub}" if cleaned_sub else "Встреча"
+                                    cleaned_sub = re.sub(r"[:\s]+$", "", cleaned_sub).strip()
+                                    if cleaned_sub:
+                                        if re.search(r"встреч[уаеы]?\s+(?:с|со)\b", u_prev, re.IGNORECASE):
+                                            meeting_title = f"Встреча с {cleaned_sub}"
+                                        else:
+                                            meeting_title = f"Встреча {cleaned_sub}"
+                                    else:
+                                        meeting_title = "Встреча"
 
                                 parsed_prev = self.date_parser.parse(u_prev, base_dt=now)
                                 if parsed_prev.dt:
@@ -369,18 +393,27 @@ class LLMClient:
             has_explicit_date_or_time = self.date_parser.parse(clean, base_dt=now).has_explicit_time
 
             title = text
-            match = re.search(r"(?:добавь|создай|поставь|запланируй)?\s*встреч[уаеы]?\s*(?:с\s+)?([^,.?!]+)", clean)
+            match = re.search(r"(?:добавь|создай|поставь|запланируй|у меня)?\s*встреч[уаеы]?\s*(?:с\s+|со\s+|по\s+|для\s+)?([^,.?!]+)", clean)
             if match:
                 raw_sub = match.group(1).strip()
                 cleaned_sub = re.sub(
-                    r"\b(завтра|сегодня|послезавтра|вчера)\b|\bв\s+\d{1,2}[:.-]\d{2}\b|\b\d{1,2}[:.-]\d{2}\b|\bв\s+\d{1,2}\b|"
+                    r"\b(завтра|сегодня|послезавтра|вчера|до конца недели|на следующей неделе)\b|"
+                    r"\bв\s+\d{1,2}(?::\d{2})?\b|\b\d{1,2}:\d{2}\b|"
                     r"\b(?:в|во|до|к|на)?\s*(?:понедельник\w*|вторник\w*|сред\w+|четверг\w*|пятниц\w+|суббот\w+|воскресень\w+)\b|"
-                    r"\b\d{1,2}\s*(?:ч|час|часа|часов)?\s*(?:утра|ночи|дня|вечера)\b|"
+                    r"\b\d{1,2}\s*(?:ч|час|часа|часов)?\s*(?:утра|ночи|дня|вечера)?\b|"
                     r"\b(?:утра|ночи|дня|вечера)\b",
-                    "", raw_sub
+                    "", raw_sub, flags=re.IGNORECASE
                 ).strip()
                 cleaned_sub = re.sub(r"[\s:]+$", "", cleaned_sub).strip()
-                title = f"Встреча с {cleaned_sub}" if cleaned_sub else "Встреча"
+                if cleaned_sub:
+                    if re.search(r"встреч[уаеы]?\s+(?:с|со)\b", clean):
+                        title = f"Встреча с {cleaned_sub}"
+                    elif cleaned_sub.startswith(("с ", "со ", "по ", "для ")):
+                        title = f"Встреча {cleaned_sub}"
+                    else:
+                        title = f"Встреча с {cleaned_sub}"
+                else:
+                    title = "Встреча"
             else:
                 title = "Встреча"
 
