@@ -8,6 +8,7 @@ from backend.db import get_db
 from backend.schemas.record import (
     RecordList,
     RecordType,
+    RecordStatus,
     RecordCreate,
     RecordOut,
     RecordUpdate,
@@ -85,3 +86,107 @@ def delete_event(
     if not service.delete(event_id):
         raise HTTPException(status_code=404, detail="Event not found")
     return {"status": "ok", "deleted_id": event_id}
+
+
+@router.post("/events/seed", response_model=RecordList)
+def seed_user_events(
+    user_id: int = Query(1),
+    db: Session = Depends(get_db),
+) -> RecordList:
+    """Инициализирует демонстрационные задачи и встречи для конкретного user_id."""
+    from backend.models.record import Record
+    from datetime import datetime, timedelta
+
+    # Удаляем только записи данного пользователя
+    db.query(Record).filter(Record.user_id == user_id).delete()
+    db.commit()
+
+    now = datetime.now().replace(minute=0, second=0, microsecond=0)
+    tomorrow = now + timedelta(days=1)
+    thursday = now + timedelta(days=(3 - now.weekday()) % 7 or 7)
+    friday = now + timedelta(days=(4 - now.weekday()) % 7 or 7)
+    sunday = now + timedelta(days=6 - now.weekday())
+
+    demo_records = [
+        Record(
+            user_id=user_id,
+            type=RecordType.reminder,
+            title="Позвонить Ивану",
+            raw_text="Напомни мне завтра в 10 утра позвонить Ивану",
+            datetime=tomorrow.replace(hour=10, minute=0),
+            status=RecordStatus.pending,
+        ),
+        Record(
+            user_id=user_id,
+            type=RecordType.task,
+            title="Отправить отчет",
+            raw_text="В пятницу нужно отправить отчет",
+            datetime=friday.replace(hour=18, minute=0),
+            status=RecordStatus.pending,
+        ),
+        Record(
+            user_id=user_id,
+            type=RecordType.task,
+            title="Купить билеты до конца недели",
+            raw_text="Поставь задачу купить билеты до конца недели",
+            datetime=sunday.replace(hour=23, minute=59, second=59),
+            status=RecordStatus.pending,
+        ),
+        Record(
+            user_id=user_id,
+            type=RecordType.meeting,
+            title="Встреча с командой",
+            raw_text="Добавь встречу с командой завтра в 15:00",
+            datetime=tomorrow.replace(hour=15, minute=0),
+            status=RecordStatus.pending,
+        ),
+        Record(
+            user_id=user_id,
+            type=RecordType.meeting,
+            title="Встреча с дизайнером",
+            raw_text="В четверг в 11 у меня встреча с дизайнером",
+            datetime=thursday.replace(hour=11, minute=0),
+            status=RecordStatus.pending,
+        ),
+        Record(
+            user_id=user_id,
+            type=RecordType.task,
+            title="Подготовить презентацию для инвесторов",
+            raw_text="Подготовить презентацию по проекту",
+            datetime=now - timedelta(days=3),
+            status=RecordStatus.done,
+        ),
+        Record(
+            user_id=user_id,
+            type=RecordType.task,
+            title="Согласовать договор с контрагентом",
+            raw_text="Поставить задачу по договору",
+            datetime=now - timedelta(days=7),
+            status=RecordStatus.done,
+        ),
+        Record(
+            user_id=user_id,
+            type=RecordType.meeting,
+            title="Встреча с Иваном по партнерству",
+            raw_text="Встреча с Иваном в кафе",
+            datetime=now - timedelta(days=5),
+            status=RecordStatus.done,
+        ),
+    ]
+    for r in demo_records:
+        db.add(r)
+    db.commit()
+
+    service = TaskService(db)
+    return service.list(user_id=user_id)
+
+
+@router.delete("/events/clear/{user_id}")
+def clear_user_events(
+    user_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    from backend.models.record import Record
+    deleted = db.query(Record).filter(Record.user_id == user_id).delete()
+    db.commit()
+    return {"status": "ok", "deleted_count": deleted, "user_id": user_id}

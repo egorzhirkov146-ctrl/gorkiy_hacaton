@@ -106,3 +106,43 @@ def test_e2e_stt_endpoint(client):
     data = res.json()
     assert "text" in data
     assert len(data["text"]) > 0
+
+
+def test_e2e_user_isolation_and_seed(client):
+    # Очищаем перед тестом
+    client.delete("/events/clear/99999")
+    client.delete("/events/clear/88888")
+
+    # 1. Сидируем изолированного пользователя 99999
+    seed_res = client.post("/events/seed", params={"user_id": 99999})
+    assert seed_res.status_code == 200
+    assert seed_res.json()["count"] == 8
+
+    # 2. Пользователь 88888 изначально имеет 0 записей
+    res_88888 = client.get("/events", params={"user_id": 88888})
+    assert res_88888.status_code == 200
+    assert res_88888.json()["count"] == 0
+
+    # 3. Пользователь 88888 создает задачу через /chat
+    chat_res = client.post(
+        "/chat",
+        json={"user_id": 88888, "session_id": "sess_iso", "text": "Поставь задачу секретный синхрофазотрон"}
+    )
+    assert chat_res.status_code == 200
+
+    # 4. Пользователь 88888 видит только свою задачу
+    res_88888_after = client.get("/events", params={"user_id": 88888})
+    assert res_88888_after.json()["count"] == 1
+    assert "синхрофазотрон" in res_88888_after.json()["items"][0]["title"]
+
+    # 5. Пользователь 99999 при поиске НЕ видит задачу пользователя 88888 (полная изоляция баз данных)
+    search_99999 = client.get("/events/search", params={"q": "синхрофазотрон", "user_id": 99999})
+    assert search_99999.status_code == 200
+    assert search_99999.json()["count"] == 0
+
+    # 6. Очистка пользователя 99999 не удаляет данные 88888
+    clear_res = client.delete("/events/clear/99999")
+    assert clear_res.status_code == 200
+    assert client.get("/events", params={"user_id": 99999}).json()["count"] == 0
+    assert client.get("/events", params={"user_id": 88888}).json()["count"] == 1
+

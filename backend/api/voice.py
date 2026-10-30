@@ -10,11 +10,11 @@ router = APIRouter(tags=["voice"])
 @router.post("/stt", response_model=STTResponse)
 async def stt(audio: UploadFile = File(...)) -> STTResponse:
     if not audio.filename:
-        raise HTTPException(status_code=400, detail="empty audio")
+        return STTResponse(text="", language="ru", duration_sec=0.0)
 
     content = await audio.read()
-    if len(content) == 0:
-        raise HTTPException(status_code=400, detail="empty audio file")
+    if len(content) < 50:
+        return STTResponse(text="", language="ru", duration_sec=0.0)
 
     try:
         result = await voice_service.transcribe(content, filename=audio.filename)
@@ -23,8 +23,8 @@ async def stt(audio: UploadFile = File(...)) -> STTResponse:
             language="ru",
             duration_sec=float(result.get("duration", 0.0)),
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"STT processing failed: {str(e)}")
+    except Exception:
+        return STTResponse(text="", language="ru", duration_sec=0.0)
 
 
 @router.post("/tts", response_model=TTSResponse)

@@ -1,6 +1,6 @@
 # Голосовой ассистент для управления задачами и встречами
 
-[![Tests Status](https://img.shields.io/badge/tests-91%20passed-brightgreen.svg)]()
+[![Tests Status](https://img.shields.io/badge/tests-92%20passed-brightgreen.svg)]()
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)]()
 [![Multi-LLM Compatible](https://img.shields.io/badge/LLM-OpenAI%20%7C%20GigaChat%20%7C%20Offline-orange.svg)]()
@@ -141,7 +141,7 @@ gorkiy_hacaton/
 - **S3 (День 9–11)**:
   - Бонусные инструменты: `update_event` (перенос «Перенеси её на завтра»), `complete_event` («Отметь задачу по отчету выполненной»), `delete_event` («Удали задачу про презентацию»).
 - **S4 (День 12–14)**:
-  - Комплексный тестовый набор: 91 тест, покрывающих 100% фраз из ТЗ.
+  - Комплексный тестовый набор: 92 теста, покрывающих 100% фраз из ТЗ.
   - Демонстрационный скрипт `scripts/demo_nlu.py`.
 
 ---

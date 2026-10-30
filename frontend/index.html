@@ -318,8 +318,13 @@
     <h1>
       <span>🎙️</span> Voice Assistant <span class="badge-live">Online</span>
     </h1>
-    <div>
-      <label style="font-size: 0.85rem; color: var(--text-muted); cursor: pointer;">
+    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+      <div style="font-size: 0.8rem; background: rgba(255,255,255,0.06); padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid var(--card-border); display: flex; align-items: center; gap: 0.35rem;">
+        <span>👤</span>
+        <span>Профиль: <strong id="userDisplay" style="color: var(--accent);">#1</strong></span>
+        <button id="switchUserBtn" style="background: none; border: none; color: var(--text-muted); cursor: pointer; text-decoration: underline; font-size: 0.75rem; padding: 0 0.2rem;" title="Сменить профиль или создать личную базу">сменить</button>
+      </div>
+      <label style="font-size: 0.85rem; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
         <input type="checkbox" id="ttsToggle" checked> Озвучивать ответы
       </label>
     </div>
@@ -356,10 +361,14 @@
 
     <div class="sidebar">
       <div class="sidebar-card">
-        <h2>
-          <span>📋 База событий</span>
-          <button class="btn" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;" onclick="loadEvents()">Обновить</button>
-        </h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.4rem;">
+          <h2 style="margin: 0; font-size: 1rem;"><span>📋 События</span></h2>
+          <div style="display: flex; gap: 0.3rem;">
+            <button class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.7rem;" onclick="loadEvents()" title="Обновить список">↻</button>
+            <button class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.7rem; background: #334155;" onclick="seedCurrentUser()" title="Заполнить демо-задачами">Демо</button>
+            <button class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.7rem; background: rgba(239, 68, 68, 0.2); color: #f87171;" onclick="clearCurrentUser()" title="Очистить все задачи">Очистить</button>
+          </div>
+        </div>
         <input type="text" id="searchInput" class="input-field" placeholder="Поиск по событиям..." style="margin-bottom: 0.75rem; padding: 0.5rem;" oninput="searchEvents(this.value)">
         <div class="events-list" id="eventsList">
           <div style="color: var(--text-muted); font-size: 0.85rem;">Загрузка событий...</div>
@@ -371,6 +380,19 @@
   <audio id="audioPlayer" style="display: none;"></audio>
 
   <script>
+    // --- Управление профилем пользователя (изоляция данных) ---
+    function getStoredUserId() {
+      let uid = localStorage.getItem("assistant_user_id");
+      if (!uid || isNaN(parseInt(uid, 10))) {
+        // Каждому новому устройству генерируем уникальный 6-значный ID пользователя
+        uid = String(Math.floor(100000 + Math.random() * 900000));
+        localStorage.setItem("assistant_user_id", uid);
+        localStorage.setItem("assistant_needs_seed_" + uid, "1");
+      }
+      return parseInt(uid, 10);
+    }
+
+    let currentUserId = getStoredUserId();
     const sessionId = "session_" + Math.random().toString(36).substring(2, 9);
     const messagesEl = document.getElementById("chatMessages");
     const inputEl = document.getElementById("chatInput");
@@ -379,10 +401,28 @@
     const eventsList = document.getElementById("eventsList");
     const audioPlayer = document.getElementById("audioPlayer");
     const ttsToggle = document.getElementById("ttsToggle");
+    const userDisplayEl = document.getElementById("userDisplay");
+    const switchUserBtn = document.getElementById("switchUserBtn");
 
-    let isRecording = false;
-    let mediaRecorder = null;
-    let audioChunks = [];
+    if (userDisplayEl) userDisplayEl.innerText = "#" + currentUserId;
+
+    if (switchUserBtn) {
+      switchUserBtn.addEventListener("click", () => {
+        const val = prompt(
+          "Введите ID профиля:\n• 1 — общий демонстрационный профиль\n• любое другое число — ваш изолированный профиль:",
+          currentUserId
+        );
+        if (val !== null) {
+          const parsed = parseInt(val.trim(), 10);
+          if (!isNaN(parsed) && parsed > 0) {
+            currentUserId = parsed;
+            localStorage.setItem("assistant_user_id", String(currentUserId));
+            if (userDisplayEl) userDisplayEl.innerText = "#" + currentUserId;
+            loadEvents();
+          }
+        }
+      });
+    }
 
     function addMessage(role, text, action = null) {
       const msg = document.createElement("div");
@@ -408,7 +448,11 @@
         const res = await fetch("/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, text: clean })
+          body: JSON.stringify({
+            user_id: currentUserId,
+            session_id: sessionId,
+            text: clean
+          })
         });
         const data = await res.json();
         if (res.ok && data.reply_text) {
@@ -452,61 +496,183 @@
       if (e.key === "Enter") sendMessage(inputEl.value);
     });
 
-    // Микрофон и STT (с автодетекцией кодека браузера)
-    micBtn.addEventListener("click", async () => {
-      if (!isRecording) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          const mimeType = (typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus"))
-            ? "audio/webm;codecs=opus"
-            : (typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm")
-              ? "audio/webm"
-              : "audio/mp4");
-          const ext = mimeType.includes("mp4") ? "mp4" : "webm";
+    // --- Голосовой ввод: нативный Web Speech API (iOS Safari / Android) + MediaRecorder fallback ---
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let isVoiceActive = false;
+    let mediaStream = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
 
-          mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-          audioChunks = [];
+    function setVoiceUIActive(active, placeholder = "Слушаю вас... Говорите") {
+      isVoiceActive = active;
+      if (active) {
+        micBtn.classList.add("recording");
+        inputEl.placeholder = placeholder;
+      } else {
+        micBtn.classList.remove("recording");
+        inputEl.placeholder = "Скажите или напишите команду...";
+      }
+    }
 
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) audioChunks.push(e.data);
-          };
+    if (SpeechRecognition) {
+      try {
+        recognition = new SpeechRecognition();
+        recognition.lang = "ru-RU";
+        recognition.interimResults = true;
+        recognition.continuous = false;
+        recognition.maxAlternatives = 1;
 
-          mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunks, { type: mimeType });
-            const formData = new FormData();
-            formData.append("audio", audioBlob, `recording.${ext}`);
+        recognition.onstart = () => {
+          setVoiceUIActive(true, "Слушаю речь... Говорите");
+        };
 
-            try {
-              addMessage("assistant", "Распознаю речь...");
-              const sttRes = await fetch("/stt", { method: "POST", body: formData });
-              const sttData = await sttRes.json();
-              if (sttData.text && sttData.text.trim()) {
-                inputEl.value = sttData.text;
-                sendMessage(sttData.text);
-              } else {
-                addMessage("assistant", "Не удалось разобрать речь, повторите пожалуйста.");
-              }
-            } catch (err) {
-              addMessage("assistant", "Ошибка распознавания аудио.");
+        recognition.onresult = (e) => {
+          let finalTranscript = "";
+          let interimTranscript = "";
+          for (let i = e.resultIndex; i < e.results.length; ++i) {
+            if (e.results[i].isFinal) {
+              finalTranscript += e.results[i][0].transcript;
+            } else {
+              interimTranscript += e.results[i][0].transcript;
             }
-          };
+          }
+          inputEl.value = finalTranscript || interimTranscript;
+        };
 
-          mediaRecorder.start();
-          isRecording = true;
-          micBtn.classList.add("recording");
-        } catch (err) {
-          alert("Не удалось получить доступ к микрофону: " + err.message);
+        recognition.onerror = (e) => {
+          console.warn("SpeechRecognition error:", e.error);
+          setVoiceUIActive(false);
+          if (e.error === "not-allowed") {
+            alert("Пожалуйста, разрешите доступ к микрофону в настройках браузера.");
+          } else if (e.error !== "no-speech" && e.error !== "aborted") {
+            startMediaRecorderFallback();
+          }
+        };
+
+        recognition.onend = () => {
+          setVoiceUIActive(false);
+          const recognized = inputEl.value.trim();
+          if (recognized) {
+            sendMessage(recognized);
+          }
+        };
+      } catch (err) {
+        console.warn("SpeechRecognition not initialized:", err);
+        recognition = null;
+      }
+    }
+
+    async function startMediaRecorderFallback() {
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        // Безопасный перебор MIME-типов без выбрасывания исключений на iOS Safari
+        let options = {};
+        let ext = "webm";
+        const candidates = [
+          { mime: "audio/webm;codecs=opus", ext: "webm" },
+          { mime: "audio/webm", ext: "webm" },
+          { mime: "audio/mp4", ext: "mp4" },
+          { mime: "audio/aac", ext: "aac" },
+          { mime: "audio/ogg", ext: "ogg" },
+          { mime: "audio/wav", ext: "wav" }
+        ];
+
+        if (typeof MediaRecorder !== "undefined" && typeof MediaRecorder.isTypeSupported === "function") {
+          for (const c of candidates) {
+            if (MediaRecorder.isTypeSupported(c.mime)) {
+              options = { mimeType: c.mime };
+              ext = c.ext;
+              break;
+            }
+          }
+        }
+
+        mediaRecorder = new MediaRecorder(mediaStream, options);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          if (mediaStream) {
+            mediaStream.getTracks().forEach(t => t.stop());
+            mediaStream = null;
+          }
+
+          const mime = mediaRecorder.mimeType || options.mimeType || "audio/webm";
+          const finalExt = mime.includes("mp4") || mime.includes("aac") ? "mp4" : ext;
+          const audioBlob = new Blob(audioChunks, { type: mime });
+
+          if (audioBlob.size < 100) return;
+
+          const formData = new FormData();
+          formData.append("audio", audioBlob, `recording.${finalExt}`);
+
+          try {
+            addMessage("assistant", "Распознаю речь...");
+            const sttRes = await fetch("/stt", { method: "POST", body: formData });
+            const sttData = await sttRes.json();
+            if (sttData && sttData.text && sttData.text.trim()) {
+              inputEl.value = sttData.text;
+              sendMessage(sttData.text);
+            } else {
+              addMessage("assistant", "Не удалось разобрать речь, повторите пожалуйста.");
+            }
+          } catch (err) {
+            addMessage("assistant", "Ошибка связи при передаче аудио.");
+          }
+        };
+
+        mediaRecorder.start(250);
+        setVoiceUIActive(true, "Идет запись аудио... Нажмите для отправки");
+      } catch (err) {
+        setVoiceUIActive(false);
+        alert("Не удалось включить микрофон: " + err.message);
+      }
+    }
+
+    function stopMediaRecorderFallback() {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        try { mediaRecorder.requestData(); } catch(e) {}
+        mediaRecorder.stop();
+      }
+      setVoiceUIActive(false);
+    }
+
+    micBtn.addEventListener("click", () => {
+      if (isVoiceActive) {
+        if (recognition) {
+          try { recognition.stop(); } catch(e) {}
+        } else {
+          stopMediaRecorderFallback();
         }
       } else {
-        mediaRecorder.stop();
-        isRecording = false;
-        micBtn.classList.remove("recording");
+        inputEl.value = "";
+        if (recognition) {
+          try {
+            recognition.start();
+          } catch (e) {
+            console.warn("Recognition start failed, fallback to MediaRecorder", e);
+            startMediaRecorderFallback();
+          }
+        } else {
+          startMediaRecorderFallback();
+        }
       }
     });
 
+    // --- Управление событиями с учетом user_id ---
     async function loadEvents() {
       try {
-        const res = await fetch("/events");
+        if (localStorage.getItem("assistant_needs_seed_" + currentUserId) === "1") {
+          localStorage.removeItem("assistant_needs_seed_" + currentUserId);
+          await fetch(`/events/seed?user_id=${currentUserId}`, { method: "POST" });
+        }
+
+        const res = await fetch(`/events?user_id=${currentUserId}`);
         const data = await res.json();
         renderEvents(data.items || []);
       } catch (err) {
@@ -520,7 +686,7 @@
         return;
       }
       try {
-        const res = await fetch(`/events/search?q=${encodeURIComponent(q)}`);
+        const res = await fetch(`/events/search?q=${encodeURIComponent(q)}&user_id=${currentUserId}`);
         const data = await res.json();
         renderEvents(data.items || []);
       } catch (err) {
@@ -528,9 +694,28 @@
       }
     }
 
+    async function seedCurrentUser() {
+      if (confirm(`Заполнить профиль #${currentUserId} демонстрационными задачами?`)) {
+        await fetch(`/events/seed?user_id=${currentUserId}`, { method: "POST" });
+        loadEvents();
+      }
+    }
+
+    async function clearCurrentUser() {
+      if (confirm(`Очистить все задачи в профиле #${currentUserId}?`)) {
+        await fetch(`/events/clear/${currentUserId}`, { method: "DELETE" });
+        loadEvents();
+      }
+    }
+
     function renderEvents(items) {
       if (!items || items.length === 0) {
-        eventsList.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem;">Записей пока нет.</div>`;
+        eventsList.innerHTML = `
+          <div style="color: var(--text-muted); font-size: 0.85rem; padding: 1rem 0; text-align: center;">
+            Записей пока нет.<br>
+            <button class="btn" style="margin-top: 0.5rem; padding: 0.3rem 0.6rem; font-size: 0.75rem;" onclick="seedCurrentUser()">Заполнить демо-данными</button>
+          </div>
+        `;
         return;
       }
       eventsList.innerHTML = items.map(it => {
