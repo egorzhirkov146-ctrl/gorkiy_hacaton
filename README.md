@@ -1,9 +1,9 @@
 # Голосовой ассистент для управления задачами и встречами
 
-[![Tests Status](https://img.shields.io/badge/tests-89%20passed-brightgreen.svg)]()
+[![Tests Status](https://img.shields.io/badge/tests-91%20passed-brightgreen.svg)]()
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)]()
-[![OpenAI Compatible](https://img.shields.io/badge/LLM-OpenAI%20%7C%20YandexGPT%20%7C%20GigaChat-orange.svg)]()
+[![Multi-LLM Compatible](https://img.shields.io/badge/LLM-OpenAI%20%7C%20GigaChat%20%7C%20Offline-orange.svg)]()
 
 Прототип русскоязычного голосового ассистента, разработанный в рамках хакатона. Позволяет пользователю управлять личными задачами, напоминаниями и встречами с помощью естественной речи и текста.
 
@@ -115,7 +115,20 @@ gorkiy_hacaton/
   - Добавлены каскадные фоллбеки: при отсутствии GPU/whisper используется Vosk или резервный обработчик; для TTS используется Microsoft Edge TTS с автоматическим переключением на Google Translate TTS при сетевых сбоях.
   - Реализована запись аудио в `data/tts/` и отдача аудио через эндпоинты `/tts` и `/tts/stream`.
 
-### 3. LLM / NLU-инженер (Наша зона ответственности)
+### 3. Data Layer & Storage Инженер (Alex Asadullin)
+- Реализована морфологическая нормализация русского текста: сведение буквы «ё» к «е», стемминг русских окончаний и расширенный словарь синонимов (`backend/storage/text.py`).
+- Подготовлен модуль развертки повторяющихся событий (`recurrence.py`: daily, weekly, monthly, yearly, weekdays).
+- Создана полнотекстовая поисковая FTS5-архитектура с BM25-ранжированием (`backend/storage/fts.py`).
+- Оформлена исчерпывающая техническая документация архитектуры хранения в [docs/DATA_LAYER.md](file:///home/danislon_zombovich/.gemini/antigravity/scratch/gorkiy_hacaton/docs/DATA_LAYER.md).
+
+### 4. Sber GigaChat & Планирование (Senya)
+- Реализована нативная поддержка модели Sber GigaChat-2-Max через Sber OAuth и endpoint chat completions с автоматическим кэшированием и продлением токенов авторизации (`backend/nlu/llm_client.py`).
+- Проработана схема строгого JSON-планирования действий ассистента.
+
+### 5. Frontend UI Инженер (Nikita)
+- Реализована адаптивная структура интерфейса, карточки задач и расписания, аудиоплеер и панель чата.
+
+### 6. LLM / NLU-инженер (Наша зона ответственности)
 - **S0 (День 1–2)**: реализован автономный скрипт прототипа function calling `scripts/prototype_nlu.py` без БД, валидирующий стабильность JSON-ответов по 5 базовым инструментам.
 - **S1 (День 3–5)**:
   - Спроектированы строгие JSON-схемы OpenAI Tool Calling (`backend/nlu/tools.py`).
@@ -128,7 +141,7 @@ gorkiy_hacaton/
 - **S3 (День 9–11)**:
   - Бонусные инструменты: `update_event` (перенос «Перенеси её на завтра»), `complete_event` («Отметь задачу по отчету выполненной»), `delete_event` («Удали задачу про презентацию»).
 - **S4 (День 12–14)**:
-  - Комплексный тестовый набор: 89 тестов, покрывающих 100% фраз из ТЗ.
+  - Комплексный тестовый набор: 91 тест, покрывающих 100% фраз из ТЗ.
   - Демонстрационный скрипт `scripts/demo_nlu.py`.
 
 ---

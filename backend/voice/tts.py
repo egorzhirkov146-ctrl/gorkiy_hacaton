@@ -63,11 +63,15 @@ async def synthesize_stream(
 
     except Exception as err:
         logger.warning(f"Сбой edge-tts ({err}), переключение на gTTS...")
-        fallback_bytes = await asyncio.wait_for(
-            asyncio.to_thread(_generate_gtts_bytes, clean_text, speed < 0.85),
-            timeout=timeout_sec
-        )
-        yield fallback_bytes
+        try:
+            fallback_bytes = await asyncio.wait_for(
+                asyncio.to_thread(_generate_gtts_bytes, clean_text, speed < 0.85),
+                timeout=min(timeout_sec, 3.0)
+            )
+            yield fallback_bytes
+        except Exception as fb_err:
+            logger.warning(f"Сбой gTTS fallback ({fb_err}), возврат dummy mp3 фрейма")
+            yield b"\xff\xfb\x90d\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
 
 async def synthesize_to_file(
@@ -86,8 +90,14 @@ async def synthesize_to_file(
     filepath = out_dir / filename
 
     audio_bytes = bytearray()
-    async for chunk in synthesize_stream(text, voice_key=voice_key, speed=speed):
-        audio_bytes.extend(chunk)
+    try:
+        async for chunk in synthesize_stream(text, voice_key=voice_key, speed=speed):
+            audio_bytes.extend(chunk)
+    except Exception as e:
+        logger.warning(f"Сбой в synthesize_to_file ({e})")
+
+    if not audio_bytes:
+        audio_bytes.extend(b"\xff\xfb\x90d\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
 
     with open(filepath, "wb") as f:
         f.write(audio_bytes)

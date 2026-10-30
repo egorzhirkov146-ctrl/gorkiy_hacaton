@@ -19,6 +19,8 @@ class RecordRepository:
             title=rec.title,
             raw_text=rec.raw_text,
             datetime=rec.datetime,
+            recurrence=rec.recurrence,
+            recurrence_until=rec.recurrence_until,
             status=RecordStatus.pending,
         )
         self.db.add(db_rec)
@@ -63,6 +65,10 @@ class RecordRepository:
             rec.datetime = update_data.datetime
         if update_data.status is not None:
             rec.status = update_data.status
+        if update_data.recurrence is not None:
+            rec.recurrence = update_data.recurrence
+        if update_data.recurrence_until is not None:
+            rec.recurrence_until = update_data.recurrence_until
 
         self.db.commit()
         self.db.refresh(rec)

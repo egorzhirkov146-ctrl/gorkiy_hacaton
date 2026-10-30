@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from backend.config import settings
@@ -25,6 +25,18 @@ def init_db() -> None:
     db_file = Path(settings.db_path)
     db_file.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+
+    # Автоматическая миграция новых колонок для SQLite
+    try:
+        with engine.begin() as conn:
+            res = conn.execute(text("PRAGMA table_info(records)")).fetchall()
+            existing_cols = {row[1] for row in res}
+            if "recurrence" not in existing_cols:
+                conn.execute(text("ALTER TABLE records ADD COLUMN recurrence VARCHAR(20)"))
+            if "recurrence_until" not in existing_cols:
+                conn.execute(text("ALTER TABLE records ADD COLUMN recurrence_until DATETIME"))
+    except Exception:
+        pass
 
 
 def get_db():

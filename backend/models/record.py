@@ -16,6 +16,8 @@ class Record(Base):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     raw_text: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     datetime: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    recurrence: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    recurrence_until: Mapped[Optional[dt.datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow, nullable=False)
     status: Mapped[RecordStatus] = mapped_column(
         SQLEnum(RecordStatus), default=RecordStatus.pending, nullable=False, index=True

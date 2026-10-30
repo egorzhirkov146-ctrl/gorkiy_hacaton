@@ -1,5 +1,11 @@
 import json
 import re
+import ssl
+import time
+import uuid
+import urllib.request
+import urllib.error
+from urllib.parse import urlencode
 from datetime import datetime
 from typing import Optional, Any
 from openai import OpenAI
@@ -8,6 +14,44 @@ from backend.config import settings
 from backend.nlu.tools import TOOLS_DEFINITIONS
 from backend.nlu.prompts import build_system_prompt
 from backend.nlu.date_parser import RussianDateParser, RU_WEEKDAYS
+
+_GIGACHAT_TOKEN = ""
+_GIGACHAT_TOKEN_EXPIRES = 0
+
+
+def get_gigachat_token(auth_key: str, scope: str = "GIGACHAT_API_PERS") -> Optional[str]:
+    global _GIGACHAT_TOKEN, _GIGACHAT_TOKEN_EXPIRES
+    if not auth_key:
+        return None
+    if _GIGACHAT_TOKEN and time.time() < _GIGACHAT_TOKEN_EXPIRES:
+        return _GIGACHAT_TOKEN
+
+    auth = auth_key.strip()
+    if not auth.lower().startswith("basic "):
+        auth = f"Basic {auth}"
+
+    req = urllib.request.Request(
+        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+        data=urlencode({"scope": scope}).encode("ascii"),
+        headers={
+            "Authorization": auth,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "RqUID": str(uuid.uuid4()),
+        },
+        method="POST"
+    )
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            _GIGACHAT_TOKEN = data.get("access_token", "")
+            _GIGACHAT_TOKEN_EXPIRES = data.get("expires_at", 0) / 1000 - 60
+            return _GIGACHAT_TOKEN
+    except Exception:
+        return None
 
 
 class LLMClient:
@@ -33,6 +77,72 @@ class LLMClient:
 
     def is_live(self) -> bool:
         return self.client is not None
+
+    def _call_gigachat(
+        self,
+        messages: list[dict[str, str]],
+        now: datetime
+    ) -> Optional[tuple[str, dict[str, Any], Optional[str]]]:
+        auth_key = settings.get_gigachat_key()
+        token = get_gigachat_token(auth_key, settings.gigachat_scope)
+        if not token:
+            return None
+
+        formatted_messages = []
+        for m in messages:
+            content = m.get("content", "")
+            if isinstance(content, str):
+                formatted_messages.append({"role": m.get("role", "user"), "content": content})
+
+        body = {
+            "model": settings.gigachat_model,
+            "messages": formatted_messages,
+            "temperature": 0.0,
+            "max_tokens": 1000,
+        }
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST"
+        )
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=settings.llm_timeout_sec, context=ctx) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                choice = resp_data["choices"][0]["message"]
+                content = choice.get("content", "").strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[-1].rstrip("`").strip()
+                try:
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict):
+                        if "function" in parsed:
+                            return parsed["function"], parsed.get("arguments", {}), content
+                        if "type" in parsed:
+                            action_type = parsed["type"]
+                            if action_type == "create":
+                                tool = "create_meeting" if parsed.get("kind") == "meeting" else "create_task"
+                                return tool, parsed, content
+                            elif action_type == "list":
+                                return "list_events", parsed, content
+                            elif action_type == "search":
+                                return "search_records", parsed, content
+                        if "reply" in parsed and parsed["reply"]:
+                            return "conversation", {"reply": parsed["reply"]}, parsed["reply"]
+                except Exception:
+                    pass
+                if content:
+                    return "conversation", {"reply": content}, content
+        except Exception:
+            return None
+        return None
 
     def call_tools(
         self,
@@ -63,6 +173,11 @@ class LLMClient:
                     return "conversation", {"reply": message.content.strip()}, message.content
             except Exception:
                 pass
+
+        if settings.get_gigachat_key():
+            g_res = self._call_gigachat(messages, current_dt)
+            if g_res:
+                return g_res
 
         user_content = ""
         for m in reversed(messages):

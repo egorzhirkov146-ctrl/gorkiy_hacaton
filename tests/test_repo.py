@@ -114,3 +114,26 @@ def test_message_repo_limit_chronological(db_session):
     contents = [m.content for m in recent]
     assert contents == ["msg_11", "msg_12", "msg_13", "msg_14", "msg_15"]
 
+
+def test_record_repo_recurrence(db_session):
+    repo = RecordRepository(db_session)
+    start_dt = datetime(2026, 11, 2, 10, 0)
+    rec = repo.create(
+        RecordCreate(
+            type=RecordType.meeting,
+            title="Еженедельный синк команды",
+            datetime=start_dt,
+            recurrence="weekly",
+        )
+    )
+    assert rec.recurrence == "weekly"
+
+    # Проверка работы модуля развертки повторений
+    from backend.storage.recurrence import occurrences
+    window_from = datetime(2026, 11, 1, 0, 0)
+    window_to = datetime(2026, 11, 25, 23, 59)
+    occ = list(occurrences(rec.datetime, rec.recurrence, window_from, window_to))
+    # 2, 9, 16, 23 ноября = 4 повторения
+    assert len(occ) == 4
+
+

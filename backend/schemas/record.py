@@ -23,12 +23,16 @@ class RecordCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     raw_text: Optional[str] = None
     datetime: Optional[dt.datetime] = None
+    recurrence: Optional[str] = None
+    recurrence_until: Optional[dt.datetime] = None
 
 
 class RecordUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     datetime: Optional[dt.datetime] = None
     status: Optional[RecordStatus] = None
+    recurrence: Optional[str] = None
+    recurrence_until: Optional[dt.datetime] = None
 
 
 class RecordOut(BaseModel):
@@ -38,6 +42,8 @@ class RecordOut(BaseModel):
     title: str
     raw_text: Optional[str] = None
     datetime: Optional[dt.datetime] = None
+    recurrence: Optional[str] = None
+    recurrence_until: Optional[dt.datetime] = None
     created_at: dt.datetime
     status: RecordStatus
 

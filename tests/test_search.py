@@ -90,3 +90,23 @@ def test_search_reverse_and_bidirectional_synonyms(search_repo):
     assert len(res_talk) > 0
     assert "презентаци" in res_talk[0].title.lower()
 
+
+def test_search_yo_folding_and_expanded_synonyms(search_repo):
+    # Тест на букву "ё" и "е": "отчёт" vs "отчет"
+    # Добавим запись с буквой ё
+    from backend.schemas.record import RecordCreate, RecordType
+    search_repo.rec_repo = RecordRepository(search_repo.db)
+    search_repo.rec_repo.create(RecordCreate(type=RecordType.task, title="Подготовить годовой отчёт"))
+    search_repo.rec_repo.create(RecordCreate(type=RecordType.meeting, title="Приём у врача кардиолога"))
+
+    # Поиск без ё должен найти запись с буквой ё
+    res_report = search_repo.search("отчет")
+    assert len(res_report) > 0
+    assert "отчёт" in res_report[0].title.lower()
+
+    # Поиск синонима доктора "поликлиника" должен найти встречу с врачом
+    res_doctor = search_repo.search("поликлиника")
+    assert len(res_doctor) > 0
+    assert "врача" in res_doctor[0].title.lower()
+
+

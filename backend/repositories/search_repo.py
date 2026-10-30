@@ -1,61 +1,19 @@
-import re
 import difflib
 from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.models.record import Record
-from backend.schemas.record import RecordType, RecordStatus
-
-
-SYNONYM_GROUPS = [
-    {"договор", "контракт", "соглашение", "документ", "бумаги"},
-    {"презентация", "презентаци", "слайды", "питч", "демо", "выступление", "доклад"},
-    {"встреча", "созвон", "митинг", "переговоры", "синк", "звонок"},
-    {"отчет", "отчёт", "доклад", "сводка"},
-
-    {"команда", "коллектив", "тим", "отдел", "разработка"},
-    {"билеты", "билет", "авиабилеты", "поездка", "перелет", "самолет", "поезд"},
-    {"позвонить", "звонок", "набрать", "созвониться"},
-    {"дизайнер", "дизайн", "макеты", "фигма"},
-]
-
-STOP_WORDS = {
-    "найди", "поищи", "поиск", "задачу", "встречу", "запись", "напоминание", "про", "о", "об",
-    "по", "с", "со", "когда", "у", "меня", "была", "я", "когда-то", "ставил", "ее",
-    "её", "в", "на", "для", "и", "или", "что", "где", "как", "там"
-}
+from backend.schemas.record import RecordType
+from backend.storage.text import fold, stem, keywords, synonym_stems, words as split_words
 
 
 def normalize_word(w: str) -> str:
-    word = re.sub(r"[^\w]", "", w.lower().strip())
-    # Базовый стемминг русских окончаний
-    endings = [
-        "ами", "ями", "ов", "ев", "ей", "иями", "иям", "иях",
-        "ую", "юю", "ой", "ей", "ою", "ею", "ом", "ем", "ах", "ях",
-        "ам", "ям", "ый", "ий", "ая", "яя", "ое", "ее", "ые", "ие",
-        "а", "е", "и", "й", "о", "у", "ы", "ь", "я"
-    ]
-    for end in endings:
-        if len(word) > len(end) + 3 and word.endswith(end):
-            return word[:-len(end)]
-    return word
+    return stem(w)
 
 
 def extract_keywords(text: str) -> list[str]:
-    words = re.findall(r"\b\w+\b", text.lower())
-    clean = [w for w in words if w not in STOP_WORDS and len(w) > 1]
-    return clean
-
-
-# Построение двунаправленного графа синонимов
-SYNONYMS_GRAPH: dict[str, set[str]] = {}
-for group in SYNONYM_GROUPS:
-    stems = {normalize_word(w) for w in group}
-    for stem in stems:
-        if stem not in SYNONYMS_GRAPH:
-            SYNONYMS_GRAPH[stem] = set()
-        SYNONYMS_GRAPH[stem].update(stems - {stem})
+    return keywords(text)
 
 
 class SearchRepository:
@@ -77,38 +35,36 @@ class SearchRepository:
         if not all_records:
             return []
 
-        clean_query = query.lower().strip()
+        clean_query = fold(query.strip())
         query_words = extract_keywords(clean_query)
         if not query_words:
-            query_words = [clean_query]
+            query_words = split_words(clean_query) or [clean_query]
 
-        query_stems = [normalize_word(w) for w in query_words]
+        query_stems = [stem(w) for w in query_words]
 
-        # Добавим синонимы двунаправленно
+        # Добавим основы синонимов двунаправленно
         expanded_stems = set(query_stems)
         for q_stem in query_stems:
-            for base_stem, syn_stems in SYNONYMS_GRAPH.items():
-                if q_stem.startswith(base_stem[:4]) or base_stem.startswith(q_stem[:4]):
-                    expanded_stems.update(syn_stems)
+            expanded_stems.update(synonym_stems(q_stem))
 
         scored_records: list[tuple[float, Record]] = []
 
         for rec in all_records:
             score = 0.0
-            title_lower = rec.title.lower()
-            raw_lower = (rec.raw_text or "").lower()
+            title_folded = fold(rec.title)
+            raw_folded = fold(rec.raw_text or "")
 
             # 1. Точное вхождение всей фразы
-            if clean_query in title_lower:
+            if clean_query in title_folded:
                 score += 5.0
-            elif clean_query in raw_lower:
+            elif clean_query in raw_folded:
                 score += 3.0
 
             # 2. Пословное совпадение и стемминг (title и raw_text)
-            title_words = extract_keywords(title_lower)
-            raw_words = extract_keywords(raw_lower)
+            title_words = extract_keywords(title_folded)
+            raw_words = extract_keywords(raw_folded)
             all_text_words = title_words + raw_words
-            all_text_stems = [normalize_word(w) for w in all_text_words]
+            all_text_stems = [stem(w) for w in all_text_words]
 
             for q_stem in query_stems:
                 if any(q_stem in t_stem or t_stem in q_stem for t_stem in all_text_stems):
@@ -122,7 +78,7 @@ class SearchRepository:
                     if any(exp_stem in t_stem or t_stem in exp_stem for t_stem in all_text_stems):
                         score += 1.2
 
-            # 4. Нечеткое совпадение (Levenshtein/SequenceMatcher)
+            # 4. Нечеткое совпадение (Levenshtein/SequenceMatcher) для опечаток
             for qw in query_words:
                 best_ratio = 0.0
                 for tw in all_text_words:
