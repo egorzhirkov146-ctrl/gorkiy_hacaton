@@ -1,3 +1,4 @@
 .env
 assistant.db
+assistant.log
 __pycache__/
